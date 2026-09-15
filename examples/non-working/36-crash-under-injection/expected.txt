@@ -21,7 +21,7 @@ examples/non-working/36-crash-under-injection/<cache>/buffer.sim.zig:20:27: in e
     if (fn_info.params[0].type.? == std.process.Init.Minimal) return wrapMain(root.main(.{
 <zig>/lib/std/start.zig:190:5: in _start (flt-sim)
     asm volatile (switch (native_arch) {
-kcov: Process exited with signal 6 (SIGABRT) at 0x106a646
+kcov: Process exited with signal 6 (SIGABRT) at <address>
 The run failed in round 1; what it printed is above.
 flt
 +- run exe flt-sim failure

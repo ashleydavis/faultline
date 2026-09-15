@@ -179,6 +179,7 @@ normalise() {
         -e '/^ +[0-9]+ reference\(s\) hidden/d' \
         -e 's/thread [0-9]+ panic/thread panic/' \
         -e 's/0x[0-9a-f]+ in /in /' \
+        -e 's/(kcov: Process exited with signal [0-9]+ \([A-Z]+\)) at 0x[0-9a-f]+/\1 at <address>/' \
         -e '/^ *\^~*$/d' \
         -e 's|/[A-Za-z0-9_./+-]*/lib/std/|<zig>/lib/std/|g' \
         -e 's|/[A-Za-z0-9_./+-]*/flt[A-Za-z0-9-]+/|<work>/|g' \
