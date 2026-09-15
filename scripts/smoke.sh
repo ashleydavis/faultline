@@ -163,6 +163,7 @@ normalise() {
         -e '/^ +[0-9]+ calls exercised$/d' \
         -e '/^ +Took [0-9]+(m [0-9]+)?s\.$/d' \
         -e 's/, [0-9]+ calls//' \
+        -e 's/ with [0-9]+ calls?//' \
         -e 's/, [0-9]+\.[0-9]+s//' \
         -e 's/, [0-9]+ms//' \
         -e '/src\/framework\//d' \

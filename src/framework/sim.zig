@@ -833,6 +833,17 @@ fn printFunctionTime(tally: FunctionTally, style: Style) void {
     }
 }
 
+// How many calls the run made, added up from what each function's driving cost. The progress line
+// counts this up while a run goes and is wiped when the report starts, so without it here the
+// number a reader watched climbing is gone by the time they are told anything else.
+fn callsMade() usize {
+    var total: usize = 0;
+    for (isolate_mod.everyTiming()) |timing| {
+        total += timing.calls;
+    }
+    return total;
+}
+
 pub fn printTallies(tallies: []const FunctionTally, files: FileCounts, faults_injected: usize, style: Style) void {
     var covered: usize = 0;
     var paths_total: usize = 0;
@@ -937,8 +948,8 @@ pub fn printTallies(tallies: []const FunctionTally, files: FileCounts, faults_in
         );
     }
     output_mod.print(
-        "{s}{s}, exercised {d} function{s} and executed {d} of {d} path{s}.{s}\n",
-        .{ colour, style.bold(), covered, plural(covered), paths_ticked, paths_total, plural(paths_total), style.reset() },
+        "{s}{s}, exercised {d} function{s} with {d} call{s} and executed {d} of {d} path{s}.{s}\n",
+        .{ colour, style.bold(), covered, plural(covered), callsMade(), plural(callsMade()), paths_ticked, paths_total, plural(paths_total), style.reset() },
     );
 
     // What went wrong in those calls, which is most of what they were for. The injected count is
