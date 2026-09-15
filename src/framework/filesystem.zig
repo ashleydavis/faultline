@@ -1,6 +1,6 @@
 // The filesystem a simulation runs against: a tree held in memory, with nothing on disk behind it.
 //
-// A run drives a function hundreds of times per seed and sweeps many seeds, so code that writes a
+// A run exercises a function hundreds of times per seed and sweeps many seeds, so code that writes a
 // file pays for a syscall on every one of them, and leaves a directory behind when a call crashes
 // halfway through. Neither belongs in a run whose point is to be fast and to leave the machine
 // exactly as it found it.
@@ -42,7 +42,7 @@ const Entry = struct {
     mtime: std.Io.Timestamp = .{ .nanoseconds = 0 },
 
     // What a write, a create or a delete is allowed to do. Honoured rather than recorded, because
-    // the code a run drives has branches for a file it cannot write and a directory it cannot add
+    // the code a run exercises has branches for a file it cannot write and a directory it cannot add
     // to, and nothing reaches them if permission is always given.
     permissions: File.Permissions = .default_file,
 };

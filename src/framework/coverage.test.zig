@@ -577,7 +577,7 @@ test "the walker sees every Zig control-flow form" {
 }
 
 // The three forms with nowhere to put a statement are marked as such, and everything else is not,
-// so a run can tell a branch it failed to drive apart from one it could never observe.
+// so a run can tell a branch it failed to exercise apart from one it could never observe.
 test "a short-circuit, a try, and the side of an `if` that carries on are what no annotation reaches" {
     const allocator = std.testing.allocator;
     const source =

@@ -1,4 +1,4 @@
-// Runs the automatic driver in a child process so a call that crashes or hangs costs one restart
+// Runs the automatic runner in a child process so a call that crashes or hangs costs one restart
 // rather than the whole run.
 //
 // Calling a function with everything its parameter types allow reaches inputs the function was
@@ -338,7 +338,7 @@ fn leaveOnProcessorTime(_: linux.SIG) callconv(.c) void {
     linux.exit_group(stalled_exit_code);
 }
 
-// Starts and stops the processor-time limit around one call. Called by whatever is driving, because
+// Starts and stops the processor-time limit around one call. Called by whatever is exercising, because
 // only it knows where one call ends and the next begins.
 pub fn startCallClock() void {
     setCallClock(call_processor_limit_seconds);
@@ -488,7 +488,7 @@ pub fn stalledCount() usize {
     return calls_stalled;
 }
 
-// How long the driving spent in one function, named the way the child named it: the module's own
+// How long the exercising spent in one function, named the way the child named it: the module's own
 // index and the function's name, separated by a tab. Kept here rather than in the run above,
 // because only the parent has a clock that survives a child being restarted.
 pub const Timing = struct {
@@ -545,20 +545,20 @@ fn addTiming(key: []const u8, nanos: u64, calls: usize, allocator: std.mem.Alloc
     try timings.append(allocator, .{ .key = try allocator.dupe(u8, key), .nanos = nanos, .calls = calls });
 }
 
-// What every function's driving cost, for whoever prints the report. The order is the order the
+// What every function's exercising cost, for whoever prints the report. The order is the order the
 // functions were first reached.
 pub fn everyTiming() []const Timing {
     return timings.items;
 }
 
-// How long one function's driving took, for whoever is printing a line about it. Zero for a
-// function nothing drove, which is what a scenario-only function reads as.
+// How long one function's exercising took, for whoever is printing a line about it. Zero for a
+// function nothing exercised, which is what a scenario-only function reads as.
 pub fn timingFor(file: []const u8, function_name: []const u8) u64 {
     const held = timingOf(file, function_name) orelse return 0;
     return held.nanos;
 }
 
-// How many calls one function was given, for the same reader. Zero for a function nothing drove.
+// How many calls one function was given, for the same reader. Zero for a function nothing exercised.
 pub fn callsFor(file: []const u8, function_name: []const u8) usize {
     const held = timingOf(file, function_name) orelse return 0;
     return held.calls;
@@ -621,12 +621,10 @@ fn reportProgress(index: usize) void {
     progress_last_ns = now;
 
     var elapsed_buffer: [32]u8 = undefined;
-    var where_buffer: [256]u8 = undefined;
-    output_mod.printProgress("  Drove {d} call{s} in {s}{s}.", .{
+    output_mod.printProgress("  Exercised {d} call{s} in {s}.", .{
         index,
         if (index == 1) "" else "s",
         elapsedText(&elapsed_buffer, now - progress_started_ns),
-        whereText(&where_buffer, timing_key),
     });
 }
 
@@ -641,23 +639,10 @@ pub fn elapsedText(buffer: []u8, nanos: u64) []const u8 {
     return std.fmt.bufPrint(buffer, "{d}m {d}s", .{ seconds / 60, seconds % 60 }) catch "a while";
 }
 
-// Which function the calls are going into, as the clause on the end of the progress line, or
-// nothing at all when no function has been named yet. `key` is the file and the function with a
-// tab between them; the file is left out because the line above already named the package.
-pub fn whereText(buffer: []u8, key: ?[]const u8) []const u8 {
-    const named = key orelse return "";
-    const tab = std.mem.indexOfScalar(u8, named, '\t') orelse return "";
-    const name = named[tab + 1 ..];
-    if (name.len == 0) {
-        return "";
-    }
-    return std.fmt.bufPrint(buffer, ", now in {s}", .{name}) catch "";
-}
-
 // Runs `body` as many times as it takes: every time a child dies or stalls, the call it was on is
 // stepped over and the next attempt resumes after it. Returns when a child reaches the end, and
 // the annotations from every attempt are in `collected`.
-pub fn driveUntilDone(
+pub fn exerciseUntilDone(
     comptime body: fn (plan: Plan, out: Emitter) void,
     collected: *std.ArrayList([]const u8),
     allocator: std.mem.Allocator,

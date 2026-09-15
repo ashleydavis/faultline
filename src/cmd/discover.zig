@@ -1,4 +1,4 @@
-// Finding what to fault test, and generating the root file that drives it.
+// Finding what to fault test, and generating the root file that exercises it.
 //
 // A repository is not told what to simulate: the tree is walked, every `<module>.sim.zig` in it is
 // found, and the root file that imports them all is generated from what was found. So a simulation
@@ -21,7 +21,7 @@ pub const Layout = struct {
     // What a source directory's path has to end with, for the same reason.
     source_suffix: []const u8 = "/src",
 
-    // What a module's own simulation file is called: a file named for the module it drives, beside
+    // What a module's own simulation file is called: a file named for the module it exercises, beside
     // it. This is the tool's own naming convention rather than any repository's, which is why it
     // has a default at all.
     simulation_suffix: []const u8 = ".sim.zig",
@@ -34,7 +34,7 @@ pub const Layout = struct {
     simulation_test_suffix: []const u8 = ".sim.test.zig",
 
     // Name prefixes that are not code to be fault tested. `fuzz_` by default, because a fuzz entry
-    // point is a harness that drives the code rather than code somebody wrote to be driven.
+    // point is a harness that exercises the code rather than code somebody wrote to be exercised.
     excluded_name_prefixes: []const []const u8 = &.{"fuzz_"},
 
     // Files that are never code to be fault tested whatever directory they sit in: a build script, its
@@ -49,8 +49,8 @@ pub const Layout = struct {
 
     // Directories to leave out of the walk entirely, by path from the repository root. A project's
     // benchmarks and its test harnesses are code, so the walk takes them for source and asks for
-    // every one of their paths to be covered, which is work nobody wants: a harness is what drives
-    // the code rather than the code being driven. Nothing in a tree says which is which, so the
+    // every one of their paths to be covered, which is work nobody wants: a harness is what exercises
+    // the code rather than the code being exercised. Nothing in a tree says which is which, so the
     // project says.
     excluded_directories: []const []const u8 = &.{},
 
@@ -340,7 +340,7 @@ const longest_useful_literal = 200;
 // The caller owns what comes back, and `freeNames` releases it.
 // The functions in one file that are generic over a type and then reflect on it: the parameter is
 // asked for its declarations, its fields or its enum values rather than only naming a type. A run
-// drives a generic function by instantiating it with a stand-in type, and no stand-in satisfies a
+// exercises a generic function by instantiating it with a stand-in type, and no stand-in satisfies a
 // body like that. Instantiating one anyway does not produce a call that finds nothing: it is a
 // compile error in the run's own binary, which stops the whole repository being fault tested. This
 // walk finds them so the run leaves them alone.
@@ -352,11 +352,11 @@ const longest_useful_literal = 200;
 //
 // A parameter handed on to another function in the same file is followed there rather than counted
 // on the spot: `retry` passes its return type to `retryOnce`, which only names it as a return type,
-// and refusing that would leave a function nothing drives for no reason.
+// and refusing that would leave a function nothing exercises for no reason.
 //
 // It errs one way on purpose. A parameter handed to a builtin that works whatever the type is does
 // not count; a call this walk cannot resolve does. A function wrongly refused here is reported as
-// one nothing drove, which somebody can see and answer; one wrongly let through stops the build.
+// one nothing exercised, which somebody can see and answer; one wrongly let through stops the build.
 //
 // The caller owns what comes back.
 pub fn reflectingFunctionsIn(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, path: []const u8) ![]const []const u8 {
@@ -445,7 +445,7 @@ fn readFunctions(allocator: std.mem.Allocator, source: [:0]const u8, tokens: []c
         if (tokens[at].tag != .keyword_fn) {
             continue;
         }
-        // A function type rather than a declaration: no name, and nothing drives it.
+        // A function type rather than a declaration: no name, and nothing exercises it.
         if (at + 2 >= tokens.len or tokens[at + 1].tag != .identifier or tokens[at + 2].tag != .l_paren) {
             continue;
         }
@@ -648,7 +648,7 @@ fn settleReflection(allocator: std.mem.Allocator, functions: []Function) !void {
 }
 
 // The builtins that take a type and work whatever it is, so handing one a stand-in says nothing
-// about whether the function can be driven.
+// about whether the function can be exercised.
 fn worksForAnyType(name: []const u8) bool {
     for ([_][]const u8{ "@as", "@sizeOf", "@alignOf", "@typeName" }) |builtin| {
         if (std.mem.eql(u8, name, builtin)) {
@@ -751,10 +751,10 @@ pub fn parsesAsZig(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, p
 
 // Whether a file reaches for the testing allocator outside a test block. The standard library
 // refuses that allocator with a compile error in anything but a test binary, so such a file cannot
-// be built into the simulation at all: it is test support rather than code to drive.
+// be built into the simulation at all: it is test support rather than code to exercise.
 //
 // Only the allocator, and only outside a `test` block. A file that merely names `std.testing`
-// inside its own tests compiles anywhere, and excluding it would leave its functions undriven.
+// inside its own tests compiles anywhere, and excluding it would leave its functions unexercised.
 //
 // Tokenized rather than searched for as text, so the name written inside a string literal or a
 // comment is not read as a use of it. The tool's own `discover.zig` holds that name as a literal,
@@ -856,7 +856,7 @@ pub fn namespaceName(allocator: std.mem.Allocator, directory: []const u8) ![]con
 // built by printing it, and everything from here to the end of `generateRoot` is both.
 //
 // It is the whole of the exemption, and it exists because Zig resolves `@import` at compile time
-// from a path written in the source. The set of files a run drives is whatever `<module>.sim.zig`
+// from a path written in the source. The set of files a run exercises is whatever `<module>.sim.zig`
 // files are on disk in the repository being fault tested, which is known only once that repository
 // has been walked, at run time. No arrangement of Zig can import a list decided then, so a file
 // holding that list has to be produced, and producing a Zig file means writing Zig.
@@ -902,8 +902,8 @@ pub fn generateRoot(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, 
 
     try writer.writeAll(root_header);
 
-    // A package per source directory, not per simulation file. A repository is driven because its
-    // code is there, so one with no `<module>.sim.zig` anywhere is still driven in full; a
+    // A package per source directory, not per simulation file. A repository is exercised because its
+    // code is there, so one with no `<module>.sim.zig` anywhere is still exercised in full; a
     // simulation file adds scenarios to a directory that already has a package.
     const directories = try sourceDirectories(allocator, modules);
     defer freeNames(allocator, directories);
@@ -913,7 +913,7 @@ pub fn generateRoot(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, 
         defer allocator.free(namespace);
         try writer.print("const {s} = struct {{\n    pub const simulations = .{{\n", .{namespace});
 
-        // Each entry carries the module its file drives as well as the file itself. The run ticks a
+        // Each entry carries the module its file exercises as well as the file itself. The run ticks a
         // module's coverage only from what its own simulation annotated, and the path here is the
         // only place that pairing is known: the file was found by name, so the module is the same
         // name without the simulation suffix.
@@ -921,8 +921,8 @@ pub fn generateRoot(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, 
             if (!std.mem.eql(u8, file.directory, directory)) {
                 continue;
             }
-            const driven = try joinPath(allocator, directory, file.name[0 .. file.name.len - layout.simulation_suffix.len]);
-            defer allocator.free(driven);
+            const exercised = try joinPath(allocator, directory, file.name[0 .. file.name.len - layout.simulation_suffix.len]);
+            defer allocator.free(exercised);
             const path = try joinPath(allocator, directory, file.name);
             defer allocator.free(path);
             if (moduleOwning(layout, path) != null) {
@@ -930,7 +930,7 @@ pub fn generateRoot(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, 
             }
             try writer.print(
                 "        .{{ .module = \"{s}.zig\", .scenarios = @import(\"{s}\") }},\n",
-                .{ driven, path },
+                .{ exercised, path },
             );
         }
 
@@ -948,7 +948,7 @@ pub fn generateRoot(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, 
 
             // A file reaching for `std.testing` outside a test block cannot be compiled into
             // anything but a test binary: the standard library refuses its allocator there. It is
-            // test support rather than code to drive, so the run leaves it out.
+            // test support rather than code to exercise, so the run leaves it out.
             if (try usesTestingOutsideTests(allocator, io, root, module_path)) {
                 continue;
             }
@@ -1024,7 +1024,7 @@ pub fn generateRoot(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, 
         try writer.print("    .{{ .directory = \"{s}\", .simulation = {s}.simulation, .excluded_directories = &[_][]const u8{{", .{ named, namespace });
         // The same names the walk above used, carried into the run: it walks the tree again to read
         // the source a checklist is built from, and without these it would build one for a file this
-        // walk left out and nothing was compiled to drive.
+        // walk left out and nothing was compiled to exercise.
         for (layout.excluded_directories) |excluded| {
             try writer.print("\"{s}\", ", .{excluded});
         }
@@ -1062,7 +1062,7 @@ pub fn writeRootIfChanged(allocator: std.mem.Allocator, io: std.Io, root: std.Io
 }
 
 // Every directory that holds a module, in path order and each named once. This is what a package
-// is built from: the code being there is what makes it driven.
+// is built from: the code being there is what makes it exercised.
 //
 // The caller owns what comes back, and `freeNames` releases it.
 fn sourceDirectories(allocator: std.mem.Allocator, modules: []const SimulationFile) ![]const []const u8 {

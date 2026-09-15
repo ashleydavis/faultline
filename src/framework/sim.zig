@@ -24,7 +24,7 @@ const checklist_mod = @import("checklist.zig");
 // depends on the annotation channel and never records anything itself.
 pub const DefaultRecorder = @import("recording.zig").Recorder;
 
-pub const canDriveAutomatically = auto_mod.canDrive;
+pub const canExerciseAutomatically = auto_mod.canExercise;
 
 // What the generated root file names as its panic handler. Only a root can declare one, and what it
 // has to do belongs to the file that forks, so the root names this and this defers to that.
@@ -70,7 +70,7 @@ pub const Environment = struct {
     clock_ms: i64 = 0,
 
     // Builds a fresh, deterministic world from `seed` alone, so calling this twice with the same
-    // seed and driving the result the same way produces byte-for-byte the same run.
+    // seed and exercising the result the same way produces byte-for-byte the same run.
     pub fn fromSeed(seed: u64) Environment {
         return .{ .seed = seed, .prng = std.Random.Xoshiro256.init(seed) };
     }
@@ -142,7 +142,7 @@ pub const exploreCoverage = coverage_search_mod.exploreCoverage;
 pub const CoverageCounts = coverage_search_mod.Counts;
 
 // The whole simulation run, which is one run for the whole repository: read the arguments, list
-// the functions every package's sources declare, build a checklist for each, drive every package's
+// the functions every package's sources declare, build a checklist for each, exercise every package's
 // scenarios, tick what they annotated, report what nothing reached, and end the process red when
 // something did not. None of it knows a package: a package declares its scenarios, its seeds and
 // its effects, and the build says where its files are.
@@ -169,8 +169,8 @@ pub const Args = struct {
     only_function: []const u8 = "",
 
     // Where the code being fault tested is, for reading its source back. Only reading: a run starts in
-    // a scratch directory of its own, never in the repository, because the functions it drives are
-    // the repository's own and some of them create files and directories. Driving those with the
+    // a scratch directory of its own, never in the repository, because the functions it exercises are
+    // the repository's own and some of them create files and directories. Exercising those with the
     // repository as the working directory is what once filled somebody's checkout with hundreds of
     // thousands of generated files, every one of them made by their own code doing exactly what it
     // was written to do, in the wrong place.
@@ -223,8 +223,8 @@ pub fn parseArgs(args: std.process.Args) !Args {
     return parsed;
 }
 
-// One function a run drives, named the way `buildChecklistOccurrence` needs to find it again.
-pub const Driven = struct {
+// One function a run exercises, named the way `buildChecklistOccurrence` needs to find it again.
+pub const Exercised = struct {
     file: []const u8,
     function_name: []const u8,
     occurrence: usize = 0,
@@ -235,7 +235,7 @@ pub const Driven = struct {
 
 // Every function a package declares, each of which gets its own checklist. Nothing pairs a scenario
 // with a function: the functions come from the walk, and what ticks their paths is what the code
-// emitted while it ran. A file that imports this framework is simulation code, driving the rest
+// emitted while it ran. A file that imports this framework is simulation code, exercising the rest
 // rather than being it, which is read from the file itself: nothing lists which files are harness,
 // so nothing goes stale when one is added or renamed.
 // Says which individual test this is, because a coverage number over one function looks exactly
@@ -243,14 +243,14 @@ pub const Driven = struct {
 // wrong about how much of their code has been run.
 fn printIndividualTest(style: Style) void {
     if (only_file.len != 0 and only_function.len != 0) {
-        output_mod.print("{s}Individual test: {s} in {s}. Nothing else is driven and nothing else is counted.{s}\n", .{ style.bold(), only_function, only_file, style.reset() });
+        output_mod.print("{s}Individual test: {s} in {s}. Nothing else is exercised and nothing else is counted.{s}\n", .{ style.bold(), only_function, only_file, style.reset() });
         return;
     }
     if (only_file.len != 0) {
-        output_mod.print("{s}Individual test: {s}. Nothing else is driven and nothing else is counted.{s}\n", .{ style.bold(), only_file, style.reset() });
+        output_mod.print("{s}Individual test: {s}. Nothing else is exercised and nothing else is counted.{s}\n", .{ style.bold(), only_file, style.reset() });
         return;
     }
-    output_mod.print("{s}Individual test: every function named {s}. Nothing else is driven and nothing else is counted.{s}\n", .{ style.bold(), only_function, style.reset() });
+    output_mod.print("{s}Individual test: every function named {s}. Nothing else is exercised and nothing else is counted.{s}\n", .{ style.bold(), only_function, style.reset() });
 }
 
 // Which individual test this run is, when it is one rather than a complete test run.
@@ -259,7 +259,7 @@ fn printIndividualTest(style: Style) void {
 // decides whether to call a function is generated at compile time, one layer per module and one per
 // function, and every one of those layers would otherwise have to carry a filter it does nothing
 // with. `isolate_mod.progress_is_watched` is a global for the same reason. They are written once,
-// before any function is driven, and the children are forked rather than started fresh, so each one
+// before any function is exercised, and the children are forked rather than started fresh, so each one
 // inherits what the parent decided.
 pub var only_file: []const u8 = "";
 pub var only_function: []const u8 = "";
@@ -276,16 +276,16 @@ pub fn isWanted(file: []const u8, function_name: []const u8) bool {
 }
 
 // The functions the repository's own files declare, which is what `everyFunction` read out of the
-// source. Set before anything is driven and read by the driver.
-var declared_in_source: []const Driven = &.{};
+// source. Set before anything is exercised and read by the runner.
+var declared_in_source: []const Exercised = &.{};
 
 // Whether a file declares this function itself.
 //
-// The driver walks the compiled module, which holds every declaration the file made and every one it
-// re-exported: a file that says `pub const Value = std.json.Value;` hands the driver the standard
+// The runner walks the compiled module, which holds every declaration the file made and every one it
+// re-exported: a file that says `pub const Value = std.json.Value;` hands the runner the standard
 // library's own container methods, and a file that re-exports another module hands it that module's
 // functions a second time. None of that is the file's own code, none of it appears on any checklist,
-// and driving it cost more than driving everything that does: `ensureTotalCapacity` handed a
+// and exercising it cost more than exercising everything that does: `ensureTotalCapacity` handed a
 // capacity from a corpus spends tens of milliseconds a call reserving memory nobody asked for.
 pub fn isDeclaredIn(file: []const u8, function_name: []const u8) bool {
     if (declared_in_source.len == 0) {
@@ -304,9 +304,9 @@ pub fn isIndividualTest() bool {
     return only_file.len != 0 or only_function.len != 0;
 }
 
-pub fn everyFunction(allocator: std.mem.Allocator, sources: []const SourceFile) ![]Driven {
-    var list: std.ArrayList(Driven) = .empty;
-    errdefer freeDrivenList(allocator, &list);
+pub fn everyFunction(allocator: std.mem.Allocator, sources: []const SourceFile) ![]Exercised {
+    var list: std.ArrayList(Exercised) = .empty;
+    errdefer freeExercisedList(allocator, &list);
 
     for (sources) |source| {
         if (isHarness(source.source)) {
@@ -317,7 +317,7 @@ pub fn everyFunction(allocator: std.mem.Allocator, sources: []const SourceFile) 
         defer coverage_mod.freeDeclarations(allocator, declarations);
 
         for (declarations) |declaration| {
-            // An individual test reports only what it drove. Leaving the rest in would report every
+            // An individual test reports only what it exercised. Leaving the rest in would report every
             // other function as having reached none of its paths, which is true and useless: they
             // were never called.
             if (!isWanted(source.file, declaration.name)) {
@@ -376,22 +376,22 @@ pub fn isHarness(source: [:0]const u8) bool {
 // tokenizer hands a string literal back. Written once, here, since this is the module imported.
 const framework_module = "\"sim\"";
 
-fn freeDrivenList(allocator: std.mem.Allocator, list: *std.ArrayList(Driven)) void {
+fn freeExercisedList(allocator: std.mem.Allocator, list: *std.ArrayList(Exercised)) void {
     for (list.items) |entry| {
         allocator.free(entry.function_name);
     }
     list.deinit(allocator);
 }
 
-pub fn freeDriven(allocator: std.mem.Allocator, list: []const Driven) void {
+pub fn freeExercised(allocator: std.mem.Allocator, list: []const Exercised) void {
     for (list) |entry| {
         allocator.free(entry.function_name);
     }
     allocator.free(list);
 }
 
-// One tally per driven function, built from the list itself rather than declared a second time.
-pub fn initialTallies(allocator: std.mem.Allocator, list: []const Driven) ![]FunctionTally {
+// One tally per exercised function, built from the list itself rather than declared a second time.
+pub fn initialTallies(allocator: std.mem.Allocator, list: []const Exercised) ![]FunctionTally {
     const built = try allocator.alloc(FunctionTally, list.len);
     for (list, 0..) |spec, index| {
         built[index] = .{ .file = spec.file, .function = spec.function_name, .occurrence = spec.occurrence };
@@ -421,7 +421,7 @@ pub fn tallyOf(tallies: []FunctionTally, comptime Namespace: type, comptime func
     return tallyIfRegistered(tallies, nameOf(Namespace, function));
 }
 
-// The tally for one function when this run drives it at all, for a fault source that adds its own
+// The tally for one function when this run exercises it at all, for a fault source that adds its own
 // count to whatever the coverage run already found. By function name alone: a package names the
 // function it means, never the file or the directory it sits in, since where a package's own files
 // live is the run's knowledge and not something a package should be able to get wrong.
@@ -472,14 +472,14 @@ pub fn isScenario(comptime Function: type) bool {
 }
 
 // One annotation a run recorded, and the module whose own simulation emitted it. The pairing is
-// what makes a function's coverage mean "this function was driven" rather than "something,
+// what makes a function's coverage mean "this function was exercised" rather than "something,
 // somewhere, happened to call it": a module reached incidentally through another module's scenario
-// annotates under that other module, so its own paths stay unticked until it is driven directly.
+// annotates under that other module, so its own paths stay unticked until it is exercised directly.
 pub const Annotated = struct {
-    // Whether this came from driving a module's functions from their types rather than from a
-    // scenario. A private function has no caller a run can reach, so what the driver reaches
+    // Whether this came from exercising a module's functions from their types rather than from a
+    // scenario. A private function has no caller a run can reach, so what the runner reaches
     // through its file's own public functions is the only coverage it will ever have.
-    from_driver: bool = false,
+    from_runner: bool = false,
 
     // The module file this was emitted under, as the build recorded it, for example
     // `packages/text/src/sleep.zig`. Empty for a simulation the build did not tag, which matches
@@ -497,7 +497,7 @@ pub fn freeAnnotated(allocator: std.mem.Allocator, list: []const Annotated) void
 }
 
 // The namespace one entry in a `simulations` tuple stands for. The build tags each entry with the
-// module its file drives, so an entry arrives as `.{ .module, .scenarios }`; a namespace written by
+// module its file exercises, so an entry arrives as `.{ .module, .scenarios }`; a namespace written by
 // hand is the type itself, and carries no module of its own.
 fn namespaceOf(comptime entry: anytype) type {
     if (@TypeOf(entry) == type) {
@@ -552,7 +552,7 @@ pub fn isSynthesizedName(name: []const u8) bool {
 // Ends the run red, naming the paths nothing reached, since a run that says only how many there
 // were leaves the reader to find them in a file they have to know about first. Each line carries
 // the file and line a terminal can open directly, and why that path failed: a branch with no
-// annotation and a branch nothing drives are different work, and the name is what tells them apart.
+// annotation and a branch nothing exercises are different work, and the name is what tells them apart.
 // Past the first few the terminal gets a count and the report's own path instead.
 pub fn failOnUntickedPaths(unticked: []const UntickedPath, style: Style, report_path: []const u8) !void {
     printUntickedPaths(unticked, style, report_path);
@@ -587,7 +587,7 @@ pub fn printUntickedPaths(unticked: []const UntickedPath, style: Style, report_p
         else
             path.file;
         output_mod.print(
-            "      {s}:{d} \"{s}\" in {s}: annotated, but {s}.sim.zig never drove it.\n",
+            "      {s}:{d} \"{s}\" in {s}: annotated, but {s}.sim.zig never exercised it.\n",
             .{ path.file, path.line, path.name, path.function, stem },
         );
     }
@@ -615,10 +615,10 @@ pub const Coverage = struct {
     }
 };
 
-// Builds every driven function's checklist from its current source, ticks it from what the run
+// Builds every exercised function's checklist from its current source, ticks it from what the run
 // annotated under that function's own module, writes each one to `report`, and fills `tallies` with
 // what it found.
-// Which annotations belong to which module, and which of them the driver reached, as positions in
+// Which annotations belong to which module, and which of them the runner reached, as positions in
 // the list the run recorded. Positions rather than names, so the order the run emitted them in
 // survives: a loop's zero, one and many paths are decided by counting iterations between one
 // traversal and the next, and a list out of order counts nothing.
@@ -626,15 +626,15 @@ const ByModule = struct {
     // One entry per module the run annotated under, each holding that module's own positions.
     modules: std.StringArrayHashMapUnmanaged(std.ArrayList(usize)) = .empty,
 
-    // The positions the driver reached, whichever module they were recorded under.
-    from_driver: std.ArrayList(usize) = .empty,
+    // The positions the runner reached, whichever module they were recorded under.
+    from_runner: std.ArrayList(usize) = .empty,
 
     fn deinit(self: *ByModule, allocator: std.mem.Allocator) void {
         for (self.modules.values()) |*positions| {
             positions.deinit(allocator);
         }
         self.modules.deinit(allocator);
-        self.from_driver.deinit(allocator);
+        self.from_runner.deinit(allocator);
     }
 
     // The names one function's checklist is ticked from, in the order the run emitted them.
@@ -656,17 +656,17 @@ const ByModule = struct {
 
         // Two lists, both in the run's own order, merged back into one of the same.
         var mine: usize = 0;
-        var driven_at: usize = 0;
-        while (mine < own.len or driven_at < self.from_driver.items.len) {
-            const take_mine = driven_at == self.from_driver.items.len or
-                (mine < own.len and own[mine] <= self.from_driver.items[driven_at]);
+        var exercised_at: usize = 0;
+        while (mine < own.len or exercised_at < self.from_runner.items.len) {
+            const take_mine = exercised_at == self.from_runner.items.len or
+                (mine < own.len and own[mine] <= self.from_runner.items[exercised_at]);
             if (take_mine) {
                 try names.append(allocator, annotated[own[mine]].name);
                 mine += 1;
                 continue;
             }
-            const at = self.from_driver.items[driven_at];
-            driven_at += 1;
+            const at = self.from_runner.items[exercised_at];
+            exercised_at += 1;
             // A position that is this module's as well has already been taken above.
             if (std.mem.eql(u8, annotated[at].module, file)) {
                 continue;
@@ -686,8 +686,8 @@ fn groupByModule(allocator: std.mem.Allocator, annotated: []const Annotated) !By
             found.value_ptr.* = .empty;
         }
         try found.value_ptr.append(allocator, at);
-        if (entry.from_driver) {
-            try grouped.from_driver.append(allocator, at);
+        if (entry.from_runner) {
+            try grouped.from_runner.append(allocator, at);
         }
     }
     return grouped;
@@ -695,7 +695,7 @@ fn groupByModule(allocator: std.mem.Allocator, annotated: []const Annotated) !By
 
 pub fn readCoverage(
     allocator: std.mem.Allocator,
-    driven: []const Driven,
+    exercised: []const Exercised,
     sources: []const SourceFile,
     annotated: []const Annotated,
     tallies: []FunctionTally,
@@ -704,7 +704,7 @@ pub fn readCoverage(
     var found: Coverage = .{ .allocator = allocator };
     errdefer found.deinit();
 
-    // What each module annotated, and what the driver reached, worked out once rather than once per
+    // What each module annotated, and what the runner reached, worked out once rather than once per
     // function. Read per function, this walked every annotation the run recorded for each of them:
     // at a quarter of a million functions' worth of names that was the larger part of the run.
     var by_module = try groupByModule(allocator, annotated);
@@ -715,7 +715,7 @@ pub fn readCoverage(
     defer names.deinit(allocator);
     var ticked_file: []const u8 = "";
 
-    for (driven, 0..) |spec, index| {
+    for (exercised, 0..) |spec, index| {
         var checklist = try buildChecklistOccurrence(
             allocator,
             spec.file,
@@ -727,15 +727,15 @@ pub fn readCoverage(
 
         // What the code annotated while it ran is the only thing that ticks a path, and only what
         // this module's own simulation file annotated: a path reached on the way through, from a
-        // scenario driving some other module, is that other module's coverage and not this one's.
+        // scenario exercising some other module, is that other module's coverage and not this one's.
         //
         // The names are kept in the order the run emitted them, and handed over together, because a
         // loop's zero, one and many paths are decided by counting a loop's own iterations between
         // one traversal and the next. Ticking name by name would leave every one of them unticked:
         // no run ever emits the name of a count.
         // A private function is reached only through a public one, which may be in another module.
-        // Nothing else can ever tick it, so the driver's reach counts wherever it came from. A
-        // public function still has to be driven directly, which is the whole point of reading per
+        // Nothing else can ever tick it, so the runner's reach counts wherever it came from. A
+        // public function still has to be exercised directly, which is the whole point of reading per
         // module.
         // What this file's own functions reached, gathered once for the whole file rather than once
         // per function: handing every function its file's whole trace meant walking the same names
@@ -749,7 +749,7 @@ pub fn readCoverage(
         if (spec.is_public) {
             checklist.tickFromTrace(names.items);
         } else {
-            // A private function has no caller a run can reach directly, so what the driver reached
+            // A private function has no caller a run can reach directly, so what the runner reached
             // through some other file's public function counts too. That list is this function's
             // own, because which of them it is depends on the function rather than the file.
             var reached: std.ArrayList([]const u8) = .empty;
@@ -796,7 +796,7 @@ pub fn readCoverage(
     return found;
 }
 
-// Every function a run drove, and how it went, one line each under the file it lives in.
+// Every function a run exercised, and how it went, one line each under the file it lives in.
 // How long this function's own calls took, on the end of its line, so a reader looking for where a
 // run spends its minutes reads down one column rather than timing anything themselves. Left off
 // where it rounds to nothing, since a column of zeroes is noise: what is worth seeing is the
@@ -925,7 +925,7 @@ pub fn printTallies(tallies: []const FunctionTally, files: FileCounts, faults_in
         );
     }
     output_mod.print(
-        "{s}{s}, drove {d} function{s} and executed {d} of {d} path{s}.{s}\n",
+        "{s}{s}, exercised {d} function{s} and executed {d} of {d} path{s}.{s}\n",
         .{ colour, style.bold(), covered, plural(covered), paths_ticked, paths_total, plural(paths_total), style.reset() },
     );
 
@@ -951,7 +951,7 @@ pub fn printTallies(tallies: []const FunctionTally, files: FileCounts, faults_in
 
     // Which files those were, since a reader has to be able to check the claim: a file with nothing
     // to test declares no function for a checklist to be built from, which is a different thing
-    // entirely from a function nothing drove, and that fails the run and prints as a failure.
+    // entirely from a function nothing exercised, and that fails the run and prints as a failure.
     // An individual test leaves files out on purpose, so they are counted rather than listed:
     // naming every file in the repository that was not asked for is longer than the report and says
     // only what the reader already asked for. Saying they declare no function would be untrue of
@@ -975,7 +975,7 @@ pub fn printTallies(tallies: []const FunctionTally, files: FileCounts, faults_in
 }
 
 // How many source files a run could fault test and how many held anything to fault test. Found counts
-// every file read that is not the harness driving the run; tested counts the ones that declared a
+// every file read that is not the harness exercising the run; tested counts the ones that declared a
 // function, which is what a checklist is built from. `untested` names the difference, borrowed from
 // the sources, so the caller frees the list and nothing else.
 pub const FileCounts = struct {
@@ -1052,7 +1052,7 @@ pub const Simulation = struct {
     // work every time.
     seeds: []const u64,
 
-    // Drives every exhaustive fault exploration this package has, and returns how many of those
+    // Exercises every exhaustive fault exploration this package has, and returns how many of those
     // runs took a fault, for the summary.
     explore: *const fn (allocator: std.mem.Allocator) anyerror!usize,
 
@@ -1070,14 +1070,14 @@ pub const Simulation = struct {
     // of its own, whose plans there are none of to replay.
     replay: ?*const fn (allocator: std.mem.Allocator, plan_text: []const u8) anyerror!void = null,
 
-    // What the types alone already say cannot be driven, worked out at compile time before any
+    // What the types alone already say cannot be exercised, worked out at compile time before any
     // call is made. A function whose parameter the run cannot build is never called at all, and a
     // function with no log has nowhere to send an annotation, so both of those read as unreached
     // paths in the report and neither says what to do about it. This is what says it.
     shortfalls: []const Shortfall = &.{},
 };
 
-// One reason a function was not driven, or was driven and could tick nothing.
+// One reason a function was not exercised, or was exercised and could tick nothing.
 pub const Shortfall = struct {
     pub const Kind = enum {
         // A parameter whose type the run cannot build, so the function is never called.
@@ -1106,7 +1106,7 @@ const simulation_declaration = "simulation";
 
 // What a package's simulation declares, found by what each declaration is rather than by a list it
 // carries: the rule the scenarios already followed, applied to the rest of what a package hands the
-// run. A package writes each piece beside the module it drives, in a `<module>.sim.zig` of its own,
+// run. A package writes each piece beside the module it exercises, in a `<module>.sim.zig` of its own,
 // names those files in one `simulations` tuple, and `standard` below builds the whole `Simulation`
 // from what the walk finds. Nothing here knows a package's own types: a scenario's subject arrives
 // as whatever the package built, and the run only passes it back.
@@ -1154,7 +1154,7 @@ pub const SeedRun = struct {
     seed_count: usize,
 };
 
-// A scenario driven once per seed, taking the world that seed built rather than an injector: the
+// A scenario exercised once per seed, taking the world that seed built rather than an injector: the
 // clock, the randomness and anything else a seed chooses, as opposed to a fault injected by name.
 pub fn isSeedScenario(comptime Function: type) bool {
     const info = @typeInfo(Function);
@@ -1165,7 +1165,7 @@ pub fn isSeedScenario(comptime Function: type) bool {
     return params.len == 1 and params[0].type == *SeedRun;
 }
 
-// A subject `exploreAll` drives: it takes an injector, checks its own points against it, and drives
+// A subject `exploreAll` exercises: it takes an injector, checks its own points against it, and exercises
 // the code under test through whatever came back. Found by this signature rather than by a package
 // building an `ExploreSubject` around it by hand, which is the same wiring every time.
 pub fn isExploration(comptime Function: type) bool {
@@ -1233,7 +1233,7 @@ pub fn everySeedScenario(comptime Namespace: type, run: *SeedRun) !void {
     }
 }
 
-// Wraps one exploration function as the `ExploreSubject` the search drives, carrying the allocator
+// Wraps one exploration function as the `ExploreSubject` the search exercises, carrying the allocator
 // function pointer has nowhere to capture.
 fn Exploring(comptime exploration: anytype) type {
     return struct {
@@ -1355,10 +1355,10 @@ pub fn traceEveryScenario(comptime Namespace: type, comptime Recorder: type, all
 
     try traceEach(Namespace, Recorder, "", allocator, &collected);
 
-    // What the types alone can reach, on top of what the scenarios drive. Nothing here is written
+    // What the types alone can reach, on top of what the scenarios exercise. Nothing here is written
     // per function: every argument comes from the signature, so a function added to a package is
     // called the moment it exists.
-    const stepped_over = try driveEach(Namespace, Recorder, allocator, &collected);
+    const stepped_over = try exerciseEach(Namespace, Recorder, allocator, &collected);
     calls_stepped_over += stepped_over.len;
     allocator.free(stepped_over);
 
@@ -1368,7 +1368,7 @@ pub fn traceEveryScenario(comptime Namespace: type, comptime Recorder: type, all
 // One simulation file at a time, each against a recorder of its own, so what a file's scenarios
 // annotated can be told from what every other file's did. Running them all against one recorder
 // would leave a module's own paths ticked by whichever scenario happened to call through it, which
-// is exactly what a run must not accept: a function is covered when its own simulation drives it.
+// is exactly what a run must not accept: a function is covered when its own simulation exercises it.
 fn traceEach(
     comptime Namespace: type,
     comptime Recorder: type,
@@ -1385,7 +1385,7 @@ fn traceEach(
     }
 }
 
-// Every module the build found, driven from its own types with no scenario written for it, in a
+// Every module the build found, exercised from its own types with no scenario written for it, in a
 // child process. Calling a function with everything its parameter types allow reaches inputs it was
 // never written for, and a signature cannot say which: what makes that survivable is that a call
 // which crashes or stalls costs one restart, is stepped over, and never tried again.
@@ -1664,7 +1664,7 @@ pub const failing_effect_every = 4;
 // exhausted at seventeen modules.
 const comptime_branch_quota = 60_000_000;
 
-// What every wait in a driven run does: nothing, at once.
+// What every wait in a exercised run does: nothing, at once.
 fn returnAtOnce(userdata: ?*anyopaque, timeout: std.Io.Timeout) std.Io.Cancelable!void {
     _ = userdata;
     _ = timeout;
@@ -1673,7 +1673,7 @@ fn returnAtOnce(userdata: ?*anyopaque, timeout: std.Io.Timeout) std.Io.Cancelabl
 // How many calls this run stepped over: a call that killed its child, or one that produced nothing
 // for long enough to be taken as stuck. Both cost the paths that call would have covered, so a run
 // that steps over anything says so rather than leaving a reader to read the gap as code nothing
-// drives.
+// exercises.
 var calls_stepped_over: usize = 0;
 
 // Somewhere for a value built while making another one to draw from. Nothing reads any of it: what
@@ -1727,7 +1727,7 @@ fn helperNamespaces(comptime Namespace: type) []const type {
                 // The simulation file itself, and then whatever it holds. A factory is as often
                 // written beside a module's scenarios as beside its tests, and the user guide says
                 // to put one there, so leaving this out left every factory in a `<module>.sim.zig`
-                // unreachable and every function taking what it builds undriven.
+                // unreachable and every function taking what it builds unexercised.
                 found = found ++ [_]type{namespaceOf(entry)} ++ helperNamespaces(namespaceOf(entry));
             }
         }
@@ -1761,11 +1761,11 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
         // say reached the parent as it was said.
         fn body(plan: isolate_mod.Plan, out: isolate_mod.Emitter) void {
             var counter: usize = 0;
-            driveNamespace(Namespace, plan, out, &counter);
+            exerciseNamespace(Namespace, plan, out, &counter);
             out.done();
         }
 
-        fn driveNamespace(
+        fn exerciseNamespace(
             comptime Inner: type,
             plan: isolate_mod.Plan,
             out: isolate_mod.Emitter,
@@ -1773,17 +1773,17 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
         ) void {
             if (@hasDecl(Inner, "modules")) {
                 inline for (Inner.modules) |entry| {
-                    driveModule(entry.code, comptime indexOfModule(entry.module), entry.literals, entry.reflecting, plan, out, counter);
+                    exerciseModule(entry.code, comptime indexOfModule(entry.module), entry.literals, entry.reflecting, plan, out, counter);
                 }
             }
             if (@hasDecl(Inner, "simulations")) {
                 inline for (Inner.simulations) |entry| {
-                    driveNamespace(namespaceOf(entry), plan, out, counter);
+                    exerciseNamespace(namespaceOf(entry), plan, out, counter);
                 }
             }
         }
 
-        fn driveModule(
+        fn exerciseModule(
             comptime Module: type,
             comptime module: usize,
             literals: []const []const u8,
@@ -1809,7 +1809,7 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
             // The network this `Io` reaches is the simulated one: no name resolves, no socket
             // opens, and every attempt fails the way a real network fails, deterministically.
             // network.zig says what that costs and why the real one cannot be handed over.
-            // The filesystem is held in memory for the same reason: a function driven hundreds of
+            // The filesystem is held in memory for the same reason: a function exercised hundreds of
             // times per seed that writes a file would pay a syscall on every one of them and leave
             // a directory behind whenever a call crashed part way through. filesystem.zig says what
             // it replaces and what it passes through.
@@ -1829,23 +1829,23 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
             inline for (@typeInfo(Module).@"struct".decls) |decl| {
                 const value = @field(Module, decl.name);
                 if (comptime (!isNamed(reflecting, decl.name) and
-                    (auto_mod.canDrive(@TypeOf(value), Log, Locating) or
-                        auto_mod.canDriveGeneric(@TypeOf(value)) or
-                        auto_mod.canDriveInvoker(@TypeOf(value)))))
+                    (auto_mod.canExercise(@TypeOf(value), Log, Locating) or
+                        auto_mod.canExerciseGeneric(@TypeOf(value)) or
+                        auto_mod.canExerciseInvoker(@TypeOf(value)))))
                 {
-                    driveFunction(value, decl.name, module, Log, literals, io, plan, out, counter, &prng);
+                    exerciseFunction(value, decl.name, module, Log, literals, io, plan, out, counter, &prng);
                 }
 
                 // A function that makes a type out of two others is instantiated with a
-                // stand-in source, and what comes back is driven like any other type: nothing
+                // stand-in source, and what comes back is exercised like any other type: nothing
                 // inside it can be reached any other way.
-                if (comptime auto_mod.canDriveTypeMaker(@TypeOf(value))) {
+                if (comptime auto_mod.canExerciseTypeMaker(@TypeOf(value))) {
                     const Made = value(auto_mod.Items(auto_mod.operation_return), auto_mod.operation_return);
                     if (comptime @typeInfo(Made) == .@"struct") {
                         inline for (@typeInfo(Made).@"struct".decls) |inner| {
                             const method = @field(Made, inner.name);
-                            if (comptime auto_mod.canDrive(@TypeOf(method), Log, Locating)) {
-                                driveFunction(method, inner.name, module, Log, literals, io, plan, out, counter, &prng);
+                            if (comptime auto_mod.canExercise(@TypeOf(method), Log, Locating)) {
+                                exerciseFunction(method, inner.name, module, Log, literals, io, plan, out, counter, &prng);
                             }
                         }
                     }
@@ -1858,11 +1858,11 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
                     inline for (@typeInfo(value).@"struct".decls) |inner| {
                         const method = @field(value, inner.name);
                         if (comptime (!isNamed(reflecting, inner.name) and
-                            (auto_mod.canDrive(@TypeOf(method), Log, Locating) or
-                                auto_mod.canDriveGeneric(@TypeOf(method)) or
-                                auto_mod.canDriveInvoker(@TypeOf(method)))))
+                            (auto_mod.canExercise(@TypeOf(method), Log, Locating) or
+                                auto_mod.canExerciseGeneric(@TypeOf(method)) or
+                                auto_mod.canExerciseInvoker(@TypeOf(method)))))
                         {
-                            driveFunction(method, inner.name, module, Log, literals, io, plan, out, counter, &prng);
+                            exerciseFunction(method, inner.name, module, Log, literals, io, plan, out, counter, &prng);
                         }
                     }
                 }
@@ -1875,7 +1875,7 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
         // inside what the function accepts. A call that hung is different: waiting out the stall
         // limit again for every later draw would cost more than the whole run, so one of those
         // drops the function's remaining calls.
-        fn driveFunction(
+        fn exerciseFunction(
             comptime function: anytype,
             comptime name: []const u8,
             comptime module: usize,
@@ -2015,7 +2015,7 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
             // A generic function has no argument tuple that can be built ahead of it: the type it
             // is instantiated with is a comptime value, so the call is assembled one parameter at a
             // time instead.
-            if (comptime auto_mod.canDriveInvoker(@TypeOf(function))) {
+            if (comptime auto_mod.canExerciseInvoker(@TypeOf(function))) {
                 // Both stand-ins, so the side that handles a failure and the side that does not are
                 // each reached.
                 if (random.boolean()) {
@@ -2059,10 +2059,10 @@ fn modulePaths(comptime Namespace: type) []const []const u8 {
     }
 }
 
-// Drives every module automatically and puts what they annotated into `collected`. Whatever had to
+// Exercises every module automatically and puts what they annotated into `collected`. Whatever had to
 // be stepped over is reported, so the run can say which calls it could not make rather than leaving
 // their paths looking simply unreached.
-fn driveEach(
+fn exerciseEach(
     comptime Namespace: type,
     comptime Recorder: type,
     allocator: std.mem.Allocator,
@@ -2074,7 +2074,7 @@ fn driveEach(
         lines.deinit(allocator);
     }
 
-    const skipped = try isolate_mod.driveUntilDone(AutomaticRun(Namespace, Recorder).body, &lines, allocator);
+    const skipped = try isolate_mod.exerciseUntilDone(AutomaticRun(Namespace, Recorder).body, &lines, allocator);
 
     const paths = comptime modulePaths(Namespace);
     for (lines.items) |line| {
@@ -2086,7 +2086,7 @@ fn driveEach(
         try collected.append(allocator, .{
             .module = paths[which],
             .name = try allocator.dupe(u8, line[split + 1 ..]),
-            .from_driver = true,
+            .from_runner = true,
         });
     }
 
@@ -2106,7 +2106,7 @@ fn traceOne(
     recorder.init(allocator);
     defer recorder.deinit();
 
-    // The same `Io` the driver hands a function it calls itself: a filesystem held in memory and a
+    // The same `Io` the runner hands a function it calls itself: a filesystem held in memory and a
     // network that refuses. A scenario writes files, so without this the trace pass is the one part
     // of a run that reaches the real disk.
     var threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
@@ -2162,15 +2162,15 @@ pub fn Subject(comptime Log: type) type {
         // lands in one place the run can read afterwards.
         log: Log,
 
-        // The `Io` to drive the code under test with. Its filesystem is held in memory and its
+        // The `Io` to exercise the code under test with. Its filesystem is held in memory and its
         // network refuses every connection, so a scenario that writes a file costs no syscall and
         // leaves nothing behind. A scenario that builds its own `Io` instead reaches the real disk,
         // which is what this field exists to stop.
         io: std.Io,
     };
 }
-// Every function the types alone already say cannot be driven, or cannot tick anything, for every
-// module the generated root found. Worked out here rather than while driving because it is a fact
+// Every function the types alone already say cannot be exercised, or cannot tick anything, for every
+// module the generated root found. Worked out here rather than while exercising because it is a fact
 // about the signatures: nothing has to run for it to be true, and a function that is never called
 // would otherwise leave the report saying only that its paths went unreached.
 fn shortfallsOf(comptime Namespace: type, comptime Recorder: type) []const Shortfall {
@@ -2216,7 +2216,7 @@ fn shortfallsInModule(
             return found;
         }
         for (@typeInfo(Module).@"struct".decls) |decl| {
-            // A function the walk found reflecting on its own type parameter is not driven, so
+            // A function the walk found reflecting on its own type parameter is not exercised, so
             // nothing is asked for it either: what it needs is not an annotation or a factory.
             if (isNamed(reflecting, decl.name)) {
                 continue;
@@ -2224,7 +2224,7 @@ fn shortfallsInModule(
             found = found ++ shortfallOf(@TypeOf(@field(Module, decl.name)), decl.name, module, Log, Locating);
 
             // A method on a type the module declares is one of its functions too, reached the same
-            // way the driving reaches it.
+            // way the exercising reaches it.
             if (@TypeOf(@field(Module, decl.name)) == type) {
                 const declared = @field(Module, decl.name);
                 if (@typeInfo(declared) == .@"struct") {
@@ -2263,9 +2263,9 @@ fn shortfallOf(
         if (@typeInfo(Function) != .@"fn") {
             return &.{};
         }
-        if (auto_mod.canDrive(Function, Log, Locating) or
-            auto_mod.canDriveGeneric(Function) or
-            auto_mod.canDriveInvoker(Function))
+        if (auto_mod.canExercise(Function, Log, Locating) or
+            auto_mod.canExerciseGeneric(Function) or
+            auto_mod.canExerciseInvoker(Function))
         {
             // It can be called. Whether anything it does can be seen is the other question.
             if (!auto_mod.takesLog(Function, Log)) {
@@ -2363,7 +2363,7 @@ pub fn standard(comptime Namespace: type) Simulation {
     // A project that declares a recorder of its own is fault tested through its own log type. One that
     // declares none gets the framework's, which records through the annotation channel.
     const Recorder = recorderTypeOf(Namespace);
-    const Driver = struct {
+    const Runner = struct {
         fn explore(allocator: std.mem.Allocator) anyerror!usize {
             return everyExploration(Namespace, allocator);
         }
@@ -2385,10 +2385,10 @@ pub fn standard(comptime Namespace: type) Simulation {
 
     return .{
         .seeds = seedsOf(Namespace),
-        .explore = Driver.explore,
-        .trace = Driver.trace,
-        .runSeed = Driver.runSeed,
-        .replay = if (comptime hasExploration(Namespace)) Driver.replayPlan else null,
+        .explore = Runner.explore,
+        .trace = Runner.trace,
+        .runSeed = Runner.runSeed,
+        .replay = if (comptime hasExploration(Namespace)) Runner.replayPlan else null,
         .shortfalls = comptime shortfallsOf(Namespace, Recorder),
     };
 }
@@ -2403,7 +2403,7 @@ pub const Package = struct {
     // Directory names the walk below this package never descends into, from what the build was told
     // to leave out. The build uses the same list to decide what to compile in, and the walk needs it
     // too: a directory left out of the compile but walked here puts files on the checklist that
-    // nothing was ever built to drive.
+    // nothing was ever built to exercise.
     excluded_directories: []const []const u8 = &.{},
 };
 
@@ -2424,13 +2424,13 @@ pub const Run = struct {
     seeds_swept: usize,
 
     // How many runs this simulation injected a fault into, for the summary. Per function it cannot
-    // be said: a fault is injected in the simulation's own code, not in the function it drives, so
+    // be said: a fault is injected in the simulation's own code, not in the function it exercises, so
     // attributing one to a function would mean naming that function by hand.
     faults_injected: usize = 0,
 
     sources: []SourceFile,
     style: Style,
-    driven: []Driven,
+    exercised: []Exercised,
     tallies: []FunctionTally,
     report_text: std.Io.Writer.Allocating,
     coverage: Coverage,
@@ -2439,7 +2439,7 @@ pub const Run = struct {
         self.coverage.deinit();
         self.report_text.deinit();
         self.allocator.free(self.tallies);
-        freeDriven(self.allocator, self.driven);
+        freeExercised(self.allocator, self.exercised);
         freeSources(self.allocator, self.sources);
     }
 };
@@ -2464,28 +2464,28 @@ pub fn startRun(allocator: std.mem.Allocator, init: std.process.Init.Minimal, ar
     // output is a file, so there they are only noise wrapped around the report.
     isolate_mod.progress_is_watched = stderr_is_tty;
 
-    // Set before anything is driven and before the function list is built, because both read it.
+    // Set before anything is exercised and before the function list is built, because both read it.
     only_file = args.only_file;
     only_function = args.only_function;
     if (isIndividualTest()) {
         printIndividualTest(style);
     }
 
-    const driven = try everyFunction(allocator, sources);
-    if (isIndividualTest() and driven.len == 0) {
+    const exercised = try everyFunction(allocator, sources);
+    if (isIndividualTest() and exercised.len == 0) {
         // Otherwise the run reports full coverage of nothing at all and exits zero, which reads as
         // a pass for a file or a function that does not exist.
         output_mod.print("Nothing here matches what was asked for, so there is nothing to fault test.\n", .{});
         // `sources` is released by the `errdefer` above. Releasing it here as well was a double
         // free that took the process down instead of printing the sentence above.
-        allocator.free(driven);
+        allocator.free(exercised);
         return error.NothingMatched;
     }
-    errdefer freeDriven(allocator, driven);
-    // Read by the driver, which otherwise drives everything the compiled module holds rather than
+    errdefer freeExercised(allocator, exercised);
+    // Read by the runner, which otherwise exercises everything the compiled module holds rather than
     // everything the file wrote.
-    declared_in_source = driven;
-    const tallies = try initialTallies(allocator, driven);
+    declared_in_source = exercised;
+    const tallies = try initialTallies(allocator, exercised);
 
     var seeds_swept: usize = 0;
     for (packages) |package| {
@@ -2498,7 +2498,7 @@ pub fn startRun(allocator: std.mem.Allocator, init: std.process.Init.Minimal, ar
         .seeds_swept = seeds_swept,
         .sources = sources,
         .style = style,
-        .driven = driven,
+        .exercised = exercised,
         .tallies = tallies,
         .report_text = .init(allocator),
         .coverage = .{ .allocator = allocator },
@@ -2514,7 +2514,7 @@ pub fn checkCoverage(run: *Run, annotated: []const Annotated) !void {
     var coverage_error: ?anyerror = null;
     run.coverage = readCoverage(
         run.allocator,
-        run.driven,
+        run.exercised,
         run.sources,
         annotated,
         run.tallies,
@@ -2637,7 +2637,7 @@ pub fn pathCounts(tallies: []const FunctionTally) struct { ticked: usize, total:
 }
 
 // Turns what the run found into the list of things to do: one line per unticked path, and one per
-// function the types alone say could not be driven. Every line carries a file and a line, which
+// function the types alone say could not be exercised. Every line carries a file and a line, which
 // means looking each function's declaration up in the source the run already read.
 //
 // The caller owns what comes back, and `freeChecklistItems` releases it.
@@ -2661,8 +2661,8 @@ pub fn buildChecklistItems(run: *Run, packages: []const Package) ![]const checkl
                     if (isolate_mod.callsFor(shortfall.module, shortfall.function) != 0) {
                         continue;
                     }
-                    // And only when it cost something. A function a scenario drives is never called
-                    // by the driver, so the test above passes it; with every path of it ticked, a
+                    // And only when it cost something. A function a scenario exercises is never called
+                    // by the runner, so the test above passes it; with every path of it ticked, a
                     // factory would change nothing, and asking for one is asking for work already
                     // done.
                     if (untickedPathsOf(run, shortfall.module, shortfall.function) == 0) {
@@ -2922,25 +2922,24 @@ pub fn runRepository(init: std.process.Init.Minimal, packages: []const Package) 
     const timing_io = timing.io();
     const started_at = std.Io.Clock.Timestamp.now(timing_io, .awake);
 
-    // What each function's driving cost, collected by the parent as the child reports it. Freed
+    // What each function's exercising cost, collected by the parent as the child reports it. Freed
     // here rather than where it is filled, because it is read once the whole run is over.
     defer isolate_mod.freeTimings(allocator);
 
     var run = try startRun(allocator, init, args, packages);
     defer run.deinit();
 
-    output_mod.print("  Read {d} source file{s}, with {d} function{s} to drive.\n", .{ run.sources.len, plural(run.sources.len), run.driven.len, plural(run.driven.len) });
+    output_mod.print("  Read {d} source file{s}, with {d} function{s} to exercise.\n", .{ run.sources.len, plural(run.sources.len), run.exercised.len, plural(run.exercised.len) });
 
     // Every package's scenarios run before anything is fault tested. What each simulation file
     // annotated ticks that file's own module and nothing else, so a function is covered only where
-    // its own simulation drove it.
+    // its own simulation exercised it.
     var annotated: std.ArrayList(Annotated) = .empty;
     defer {
         for (annotated.items) |entry| allocator.free(entry.name);
         annotated.deinit(allocator);
     }
     for (packages) |package| {
-        output_mod.print("  {s}: scenarios first, then every function from its own types.\n", .{package.directory});
         run.faults_injected += try package.simulation.explore(allocator);
 
         // The names move into `annotated` above, which frees them; the slice they arrived in is
@@ -2973,7 +2972,7 @@ pub fn runRepository(init: std.process.Init.Minimal, packages: []const Package) 
 
 
 // What a package hands the enumeration: the files it owns, the checklists it registered, and which
-// file's own declarations are the driver's plumbing rather than ported logic.
+// file's own declarations are the runner's plumbing rather than ported logic.
 // Every one of them is the package's own knowledge, which is why they arrive as values rather than
 // being read from anything here.
 pub const AccountingOptions = struct {
@@ -2992,8 +2991,8 @@ pub const Accounting = enum { registered, structural, unaccounted };
 // Split out from `checkEveryDeclarationAccountedFor` so the classification itself is provable
 // against a small fixture directly (`sim.test.zig`) rather than only by walking the package's own
 // real source. Checks `declaration`, found in `file`, against `registered` (has this run given it a
-// checklist) and, when `isDriverFile` says the file is the package's own simulation code, against
-// the driver's own plumbing. The
+// checklist) and, when `isRunnerFile` says the file is the package's own simulation code, against
+// the runner's own plumbing. The
 // first is matched by file, name and occurrence
 // together, never by name alone, since two declarations sharing a name in one file (`log.zig`'s two
 // `dispatch`s, its two `log`s, `random_generator.zig`'s two `random`s) would otherwise let one that
@@ -3001,7 +3000,7 @@ pub const Accounting = enum { registered, structural, unaccounted };
 // this pass registers unable to be told apart from dead code on paper alone. `structural_names` is
 // matched by name alone: `sim_structural_declarations` below is the one real caller of this, and none
 // of its own names collide with `Environment`'s five method names, which are the only declarations in
-// the framework's own files this ever needs to tell apart from driver code.
+// the framework's own files this ever needs to tell apart from runner code.
 pub fn accountFor(
     registered: []const FunctionTally,
     file: []const u8,
@@ -3017,9 +3016,9 @@ pub fn accountFor(
         }
     }
 
-    // Every declaration in the driver's own file is plumbing. The file exists to drive the
+    // Every declaration in the runner's own file is plumbing. The file exists to exercise the
     // simulation and holds no ported logic, so naming its declarations one by one was a list that
-    // grew with the driver and told a reader nothing the file's own name does not.
+    // grew with the runner and told a reader nothing the file's own name does not.
     if (is_harness) {
         return .structural;
     }
@@ -3028,7 +3027,7 @@ pub fn accountFor(
 }
 // Walks every `fn` declaration `all_source_files` holds and classifies each with `accountFor`,
 // printing one line for anything that is not an ordinary registered checklist so a reader can see why
-// (`STRUCTURAL` for `sim.zig`'s own driver code) and one for anything
+// (`STRUCTURAL` for `sim.zig`'s own runner code) and one for anything
 // `accountFor` could not account for at all, which is what fails the build. Returns whether every
 // declaration was accounted for.
 pub fn checkEveryDeclarationAccountedFor(
@@ -3048,7 +3047,7 @@ pub fn checkEveryDeclarationAccountedFor(
                 .registered => {},
                 .structural => {
                     try report.writer.print(
-                        "STRUCTURAL {s}:{d} \"{s}\": harness code driving the run, so nothing fault tests it.\n",
+                        "STRUCTURAL {s}:{d} \"{s}\": harness code exercising the run, so nothing fault tests it.\n",
                         .{ source_file.file, declaration.line, declaration.name },
                     );
                 },
@@ -3069,7 +3068,7 @@ pub fn checkEveryDeclarationAccountedFor(
 // work every time it is run: reproducibility depends on the sequence of operations being fixed,
 // not only on the seed each one starts from. `allocator_fail_indices` is how many allocation
 // ordinals this seed's allocator scenario tries.
-// What this run drove, function by function, so the summary can say which functions were tested,
+// What this run exercised, function by function, so the summary can say which functions were tested,
 // how many of each one's paths ran, and how many faults went into each. The counters live here
 // rather than in `testing/sim` because which function a scenario is exercising is this package's
 // own knowledge: the framework only ever sees a subject and a point.
@@ -3088,8 +3087,8 @@ pub const FunctionTally = struct {
 
     // Ticked, the total that can be ticked, and the paths no annotation can reach (a short-circuit
     // or a `try`, which have no statement position), from a coverage checklist. `null` for a
-    // function this package drives without a dedicated one of its own; every function this file
-    // drives has one today. `total` counts only what a run can tick, so a function reads as passing
+    // function this package exercises without a dedicated one of its own; every function this file
+    // exercises has one today. `total` counts only what a run can tick, so a function reads as passing
     // when it has reached everything reachable, and the unobservable count is printed beside it
     // rather than folded in, where it would make a covered function look uncovered forever.
     paths: ?struct { ticked: usize, total: usize, unobservable: usize = 0 } = null,
@@ -3213,8 +3212,8 @@ fn collectSourcePaths(
                 }
 
                 // A directory the build was told to leave out. Named rather than matched, so a
-                // project says which of its directories hold what drives the code rather than what
-                // is driven.
+                // project says which of its directories hold what exercises the code rather than what
+                // is exercised.
                 if (isExcluded(excluded_directories, entry.name)) {
                     continue;
                 }
@@ -3235,7 +3234,7 @@ fn collectSourcePaths(
                     continue;
                 }
                 // A build script and its manifest are how a repository is built rather than code
-                // somebody wrote to be driven, and nothing generates a checklist for them, so
+                // somebody wrote to be exercised, and nothing generates a checklist for them, so
                 // reading them here would report every function in them as unaccounted for.
                 if (std.mem.eql(u8, entry.name, "build.zig") or std.mem.eql(u8, entry.name, "build.zig.zon")) {
                     continue;
@@ -3342,7 +3341,7 @@ pub fn freeSources(allocator: std.mem.Allocator, sources: []SourceFile) void {
     allocator.free(sources);
 }
 
-// The text of one file the walk read, by the path the driven table names it under.
+// The text of one file the walk read, by the path the exercised table names it under.
 pub fn sourceFor(sources: []const SourceFile, file: []const u8) [:0]const u8 {
     for (sources) |source| {
         if (std.mem.eql(u8, source.file, file)) {
@@ -3356,7 +3355,7 @@ pub fn sourceFor(sources: []const SourceFile, file: []const u8) [:0]const u8 {
 // from anything written down: start at the scenario, take every call its body makes, and follow
 // each one that lands on a declaration in these sources, repeating until nothing new is reached.
 //
-// A scenario reaches most of what it drives indirectly, through a helper, through a struct's own
+// A scenario reaches most of what it exercises indirectly, through a helper, through a struct's own
 // method, or through a comptime-duck-typed operation, so the calls one body makes are not enough on
 // their own. The transitive closure is.
 //

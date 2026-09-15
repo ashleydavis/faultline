@@ -1,4 +1,4 @@
-// A function whose answer depends on time, driven with the clock not moving, jumping forward, and
+// A function whose answer depends on time, exercised with the clock not moving, jumping forward, and
 // jumping backward past where it started.
 
 const faultline = @import("log");

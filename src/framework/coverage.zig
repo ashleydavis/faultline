@@ -42,7 +42,7 @@ pub const Path = struct {
     // emitted when they are taken: they are real paths, counted and listed, but no run can ever
     // tick one, and line coverage over the built binary is what covers them instead. Every other
     // form can hold a statement, or be written so it can, so it is observable and has to be
-    // annotated and driven.
+    // annotated and exercised.
     observable: bool = true,
 
     // For the side of an `if` that has no `else`: the two names a run counts to decide it ran.
@@ -376,7 +376,7 @@ pub const Declaration = struct {
     occurrence: usize,
 
     // Whether anything outside this file can call it. A private function has no caller a run can
-    // reach directly, so the only way it is ever driven is through whatever public function of its
+    // reach directly, so the only way it is ever exercised is through whatever public function of its
     // own file calls it.
     is_public: bool = false,
 };
@@ -442,7 +442,7 @@ pub fn functionAtLine(allocator: std.mem.Allocator, source: [:0]const u8, line: 
 
 // Every `fn` declaration `source` holds, wherever it sits (top level, or nested in a container),
 // in the order `tree.nodes` holds them. What a package's own enumeration reads to ask "does my own
-// simulation drive every function I declare", one file at a time, since which files a package owns
+// simulation exercise every function I declare", one file at a time, since which files a package owns
 // and which it excludes (its own test files, its own harness entry points) is that package's own
 // knowledge, not this framework's: `sim.zig`'s own header says the dependency runs one way.
 pub fn listDeclarations(allocator: std.mem.Allocator, source: [:0]const u8) ListError![]const Declaration {
@@ -986,7 +986,7 @@ fn walkEveryBranch(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index
         }
 
         // `try` is an early return out of the function when the call fails, which is a path
-        // through it whether or not anything ever drives the failure.
+        // through it whether or not anything ever exercises the failure.
         if (tree.nodeTag(node) == .@"try") {
             const line = lineOf(tree, tree.nodeMainToken(node));
             try paths.append(allocator, .{

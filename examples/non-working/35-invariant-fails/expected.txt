@@ -1,8 +1,7 @@
 Fault testing the Zig source in 35-invariant-fails.
 
 Deterministic simulation of 1 package. The report comes at the end.
-  Read 2 source files, with 1 function to drive.
-  .: scenarios first, then every function from its own types.
+  Read 2 source files, with 1 function to exercise.
 Failing ledger.sim.zig:28#0 with rejected failed the run with TotalWentNegative.
 Reproduce it with: flt --replay "ledger.sim.zig:28#0=rejected"
 The run stopped with TotalWentNegative.

@@ -27,7 +27,7 @@ const two_point_source =
 
 const one_failure = [_]sim.Failure{.{ .name = "fail", .err = error.Injected }};
 
-// Drives `twoPointScenario`'s own logic (not the parsed text above, which exists only to be read
+// Exercises `twoPointScenario`'s own logic (not the parsed text above, which exists only to be read
 // by `coverage.build`): two independent points, and the checklist ticked to match whichever of the
 // four combinations this run's injector answers.
 const TwoPointSubject = struct {
@@ -72,7 +72,7 @@ test "level 2 ticks a path that needs two simultaneous faults, and the search st
     try std.testing.expectEqual(@as(usize, 4), state.calls);
 }
 
-// A branch this driver never reaches, whatever is injected: proves item 4 (an unticked path is
+// A branch this runner never reaches, whatever is injected: proves item 4 (an unticked path is
 // reported by function and line) and item 8 (a level ticking nothing new ends the bounded search)
 // together, since both are the same run here.
 const unreachable_source =
@@ -93,7 +93,7 @@ const UnreachableSubject = struct {
         const self: *UnreachableSubject = @ptrCast(@alignCast(ctx));
         self.calls += 1;
         // Asks the injector so a point exists to explore, then ignores the answer entirely: this
-        // driver always takes the "reachable" side, so "never-reached" can never tick no matter
+        // runner always takes the "reachable" side, so "never-reached" can never tick no matter
         // how many levels the search tries.
         _ = injector.check(@src(), 0, &one_failure);
         checklist.tick("reachable");
@@ -203,7 +203,7 @@ test "a ceiling on total injected runs ends the search even while every run is s
     try std.testing.expectEqual(@as(usize, 2), checklist.untickedCount());
 }
 
-// The same "never varies" driver as the unreachable-branch test above, but with three independent
+// The same "never varies" runner as the unreachable-branch test above, but with three independent
 // points to explore rather than one, so levels 1 through 3 each have a real combination to try
 // without running out of points to combine. Proves item 10: `max_tickless_levels` widens how many
 // consecutive unproductive levels the search tolerates before giving up, above the default of one.
@@ -266,7 +266,7 @@ test "max_tickless_levels lets the search run through more unproductive levels b
 }
 
 // A loop with the two plain annotations a loop carries, one immediately before it and one at the
-// top of its body: item 6's own fixture, driven at all three counts by varying the input rather
+// top of its body: item 6's own fixture, exercised at all three counts by varying the input rather
 // than by injecting a fault, the "vary inputs and mocks" half of what a run ticks off. The code
 // says only where the loop is and where an iteration begins; how many times it went round is the
 // run's to count.
@@ -292,7 +292,7 @@ const LoopSubject = struct {
         _ = ctx;
         _ = injector;
         for ([_]usize{ 0, 1, 5 }) |count| {
-            // One for the loop itself and one per iteration, at the largest count driven below.
+            // One for the loop itself and one per iteration, at the largest count exercised below.
             var names: [6][]const u8 = undefined;
             names[0] = "iterate-loop";
             var index: usize = 0;

@@ -10,7 +10,7 @@ zig fetch --save=faultline git+https://github.com/ashleydavis/faultline
 
 ## 2. Add the build step
 
-One line in your `build.zig`. It adds a step named `flt`, attaches the `annotate` module to yours, and walks your tree for what to drive.
+One line in your `build.zig`. It adds a step named `flt`, attaches the `annotate` module to yours, and walks your tree for what to exercise.
 
 ```zig
 @import("faultline").addFaultTest(b, .{ .imports = your_imports });
@@ -99,7 +99,7 @@ pub fn imageLoader() ImageLoader {
 }
 ```
 
-Write as many as you like for one type and Faultline uses all of them. Write one per fault to drive the error handling paths in the code that uses it:
+Write as many as you like for one type and Faultline uses all of them. Write one per fault to exercise the error handling paths in the code that uses it:
 
 ```zig
 pub fn missingFileLoader() ImageLoader {
@@ -150,7 +150,7 @@ pub fn runPngHeaderScenario(self: *Subject, injector: *sim.Injector, checklist: 
 
 Copy those three parameters exactly and make the function `pub`: Faultline finds a scenario by its parameter types, never by its name. `simulation` is the one name you cannot use.
 
-Pass `self.log` to the code you drive, or its annotations go unseen. Return any error when the answer is wrong, and Faultline stops and prints the command that reproduces it.
+Pass `self.log` to the code you exercise, or its annotations go unseen. Return any error when the answer is wrong, and Faultline stops and prints the command that reproduces it.
 
 ## Sim files
 

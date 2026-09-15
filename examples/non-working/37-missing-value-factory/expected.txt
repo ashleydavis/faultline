@@ -1,8 +1,7 @@
 Fault testing the Zig source in 37-missing-value-factory.
 
 Deterministic simulation of 1 package. The report comes at the end.
-  Read 2 source files, with 2 functions to drive.
-  .: scenarios first, then every function from its own types.
+  Read 2 source files, with 2 functions to exercise.
   Reading what those calls reached.
   .: sweeping 32 seeds.
 
@@ -13,7 +12,7 @@ Deterministic simulation
 
   1 function covered every path, and is not listed above.
 
-  Found 1 source file, tested 1, drove 2 functions and executed 1 of 3 paths.
+  Found 1 source file, tested 1, exercised 2 functions and executed 1 of 3 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Swept 32 seeds, with no crash and every recovery invariant holding.
   Full detail is in <cache>/sim-coverage-report.txt.
@@ -23,8 +22,8 @@ Deterministic simulation
 
 
   FAIL 2 code paths that nothing reached:
-      store.zig:16 "valueFor-found" in valueFor: annotated, but store.sim.zig never drove it.
-      store.zig:19 "valueFor-missing" in valueFor: annotated, but store.sim.zig never drove it.
+      store.zig:16 "valueFor-found" in valueFor: annotated, but store.sim.zig never exercised it.
+      store.zig:19 "valueFor-missing" in valueFor: annotated, but store.sim.zig never exercised it.
 
   One thing to do:
     Write a test input factory returning store.Store, which valueFor takes. Without one, valueFor at store.zig:15 cannot be called at all.

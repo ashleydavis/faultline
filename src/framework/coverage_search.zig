@@ -8,7 +8,7 @@ const Injection = plan_mod.Injection;
 const coverage_mod = @import("coverage.zig");
 const Checklist = coverage_mod.Checklist;
 
-// Drives a `CoverageSubject` through its own checklist (`coverage.zig`), deepening how many faults
+// Exercises a `CoverageSubject` through its own checklist (`coverage.zig`), deepening how many faults
 // land at once while any path stays unticked. The checklist comes from the parser, for the
 // function under test only. Bounded three ways, so a run that could not cover everything never
 // looks like one that did:
@@ -24,7 +24,7 @@ const Checklist = coverage_mod.Checklist;
 // a test can assert on the checklist directly and the one caller that runs for real
 // (`sim.zig`) is the one place that turns it into output and an exit code.
 
-// What is driven through coverage exploration: one function pointer with a context beside it, the
+// What is exercised through coverage exploration: one function pointer with a context beside it, the
 // same shape `sim.ExploreSubject` already uses. `run` is handed the injector this run was built with (so
 // it queues whichever faults this run wants) and the checklist the search is trying to tick off;
 // it calls `checklist.tick(name)` for whichever of its own branches this particular run reached,
@@ -34,7 +34,7 @@ pub const CoverageSubject = struct {
     // What `run` reads and writes through: the state a particular subject closes over.
     ctx: *anyopaque,
 
-    // Drives one run of the function under test, given the injector this run was built with and
+    // Exercises one run of the function under test, given the injector this run was built with and
     // the checklist to tick.
     run: *const fn (ctx: *anyopaque, injector: *Injector, checklist: *Checklist) anyerror!void,
 };
@@ -55,7 +55,7 @@ pub const Counts = struct {
 };
 
 pub const ExploreCoverageOptions = struct {
-    // What this search drives.
+    // What this search exercises.
     subject: CoverageSubject,
 
     // What this search is trying to tick fully.

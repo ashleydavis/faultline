@@ -2,7 +2,7 @@ const std = @import("std");
 const sim = @import("sim.zig");
 
 // A fake subject with one call site that can fail two ways, used to prove `exploreAll` actually
-// drives every declared failure at every recorded point rather than only the ones a scenario
+// exercises every declared failure at every recorded point rather than only the ones a scenario
 // happens to hit. Nothing here is specific to a consuming project: a package's own tests, not this
 // file, are what prove the framework against a real effect.
 const widget_failures = [_]sim.Failure{
@@ -277,49 +277,49 @@ const fixture_source =
 ;
 
 // A file that imports the framework is simulation code: that is how `everyFunction` tells harness
-// from the code it drives, so the fixture says it the same way a real one does.
+// from the code it exercises, so the fixture says it the same way a real one does.
 const harness_source =
     \\const sim = @import("sim");
     \\
-    \\fn drives() void {}
+    \\fn exercises() void {}
 ;
 
 test "everyFunction lists a package's own functions and skips its simulation code" {
     const allocator = std.testing.allocator;
     const sources = [_]sim.SourceFile{
         .{ .file = "fixture.zig", .source = fixture_source },
-        .{ .file = "driver.zig", .source = harness_source },
+        .{ .file = "runner.zig", .source = harness_source },
     };
 
-    const driven = try sim.everyFunction(allocator, &sources);
-    defer sim.freeDriven(allocator, driven);
+    const exercised = try sim.everyFunction(allocator, &sources);
+    defer sim.freeExercised(allocator, exercised);
 
-    try std.testing.expectEqual(@as(usize, 2), driven.len);
-    try std.testing.expectEqualStrings("fixture.zig", driven[0].file);
-    try std.testing.expectEqualStrings("covered", driven[0].function_name);
-    try std.testing.expectEqualStrings("missed", driven[1].function_name);
+    try std.testing.expectEqual(@as(usize, 2), exercised.len);
+    try std.testing.expectEqualStrings("fixture.zig", exercised[0].file);
+    try std.testing.expectEqualStrings("covered", exercised[0].function_name);
+    try std.testing.expectEqualStrings("missed", exercised[1].function_name);
 }
 
 test "readCoverage reports the paths nothing annotated and fills in the tallies" {
     const allocator = std.testing.allocator;
     const sources = [_]sim.SourceFile{.{ .file = "fixture.zig", .source = fixture_source }};
 
-    const driven = try sim.everyFunction(allocator, &sources);
-    defer sim.freeDriven(allocator, driven);
-    const tallies = try sim.initialTallies(allocator, driven);
+    const exercised = try sim.everyFunction(allocator, &sources);
+    defer sim.freeExercised(allocator, exercised);
+    const tallies = try sim.initialTallies(allocator, exercised);
     defer allocator.free(tallies);
 
     var report: std.Io.Writer.Allocating = .init(allocator);
     defer report.deinit();
 
-    // What a run that drove only the true side, from `fixture.zig`'s own simulation, would have
+    // What a run that exercised only the true side, from `fixture.zig`'s own simulation, would have
     // annotated.
     const annotated = [_]sim.Annotated{
         .{ .module = "fixture.zig", .name = "covered:entered" },
         .{ .module = "fixture.zig", .name = "covered-true" },
     };
 
-    var found = try sim.readCoverage(allocator, driven, &sources, &annotated, tallies, &report);
+    var found = try sim.readCoverage(allocator, exercised, &sources, &annotated, tallies, &report);
     defer found.deinit();
 
     // The false side of `covered`. `missed` was never called and carries no mark of its own, so
@@ -358,7 +358,7 @@ test "isScenario accepts a scenario's own signature and nothing else" {
         }
 
         // A scenario naming its own subject type rather than taking the erased pointer, which is
-        // what a scenario written beside the module it drives does.
+        // what a scenario written beside the module it exercises does.
         fn typedScenario(subject: *Subject, injector: *sim.Injector, checklist: *sim.Checklist) anyerror!void {
             _ = subject;
             _ = injector;
@@ -446,7 +446,7 @@ test "accountFor holds a declaration to account wherever it is not simulation co
 
 // A package's simulation in miniature, for the discovery tests below: one module file holding a
 // scenario, a seed scenario and an exploration, and a root declaring the recorder a run records
-// into, exactly as a real package does. Written here rather than driven through a real package so a
+// into, exactly as a real package does. Written here rather than exercised through a real package so a
 // failure names the walk rather than whatever the package happened to declare.
 //
 // Each one records that it ran in something the walk itself handed it, so nothing here keeps state
@@ -467,7 +467,7 @@ const FakeModuleSimulation = struct {
     pub fn runSomethingCoverageScenario(subject: *sim.Subject(FakeLog), injector: *sim.Injector, checklist: *sim.Checklist) anyerror!void {
         _ = injector;
         _ = checklist;
-        // What a real scenario does: it drives code that annotates, and the run reads the name back
+        // What a real scenario does: it exercises code that annotates, and the run reads the name back
         // off the recorder. Counting as well, for the tests that hand in a recorder of their own.
         annotate_mod.annotate(subject.log, "scenario-ran", "", .{});
         fixture_ran += 1;
@@ -560,7 +560,7 @@ test "traceEveryScenario builds the recorder, walks every scenario and returns w
     try std.testing.expect(sawName(annotated, "scenario-ran"));
 }
 
-// What the build generates: each file tagged with the module it drives, so what its scenarios
+// What the build generates: each file tagged with the module it exercises, so what its scenarios
 // annotate is attributed to that module rather than to whatever else the run happened to reach.
 const FakeTaggedRoot = struct {
     pub const simulations = .{
@@ -570,7 +570,7 @@ const FakeTaggedRoot = struct {
     pub const Recorder = FakeSimulationRoot.Recorder;
 };
 
-test "traceEveryScenario tags what a file annotated with the module that file drives" {
+test "traceEveryScenario tags what a file annotated with the module that file exercises" {
     const annotated = try sim.traceEveryScenario(FakeTaggedRoot, FakeTaggedRoot.Recorder, std.testing.allocator);
     defer sim.freeAnnotated(std.testing.allocator, annotated);
 
@@ -580,14 +580,14 @@ test "traceEveryScenario tags what a file annotated with the module that file dr
 
 // The rule the whole attribution exists for: a function reached on the way through another module's
 // scenario is that module's coverage, so this one's paths stay unticked until its own simulation
-// drives it.
+// exercises it.
 test "readCoverage ignores an annotation another module's simulation emitted" {
     const allocator = std.testing.allocator;
     const sources = [_]sim.SourceFile{.{ .file = "fixture.zig", .source = fixture_source }};
 
-    const driven = try sim.everyFunction(allocator, &sources);
-    defer sim.freeDriven(allocator, driven);
-    const tallies = try sim.initialTallies(allocator, driven);
+    const exercised = try sim.everyFunction(allocator, &sources);
+    defer sim.freeExercised(allocator, exercised);
+    const tallies = try sim.initialTallies(allocator, exercised);
     defer allocator.free(tallies);
 
     var report: std.Io.Writer.Allocating = .init(allocator);
@@ -598,7 +598,7 @@ test "readCoverage ignores an annotation another module's simulation emitted" {
         .{ .module = "caller.zig", .name = "covered-true" },
     };
 
-    var found = try sim.readCoverage(allocator, driven, &sources, &annotated, tallies, &report);
+    var found = try sim.readCoverage(allocator, exercised, &sources, &annotated, tallies, &report);
     defer found.deinit();
 
     try std.testing.expectEqual(@as(usize, 0), tallies[0].paths.?.ticked);
@@ -613,7 +613,7 @@ test "everySeedScenario reaches a seed scenario in a file the root only names" {
     try std.testing.expectEqual(@as(i64, 4), env.clock_ms);
 }
 
-test "everyExploration drives an exploration once per declared failure it recorded" {
+test "everyExploration exercises an exploration once per declared failure it recorded" {
     const injected = try sim.everyExploration(FakeSimulationRoot, std.testing.allocator);
 
     try std.testing.expectEqual(widget_failures.len, injected);
@@ -829,11 +829,11 @@ test "an empty checklist has nothing on it" {
 }
 
 test "the tallies a run starts with are one per function, with nothing ticked" {
-    const driven = [_]sim.Driven{
+    const exercised = [_]sim.Exercised{
         .{ .file = "a.zig", .function_name = "one" },
         .{ .file = "a.zig", .function_name = "two", .occurrence = 1 },
     };
-    const tallies = try sim.initialTallies(std.testing.allocator, &driven);
+    const tallies = try sim.initialTallies(std.testing.allocator, &exercised);
     defer std.testing.allocator.free(tallies);
 
     try std.testing.expectEqual(@as(usize, 2), tallies.len);
@@ -913,7 +913,7 @@ test "the two together are an individual test over one function in one file" {
 test "the walk that reads a package's source leaves out a directory the build excluded" {
     // The build leaves the directory out of what it compiles, and this walk is the other half: it
     // reads the tree again to build the checklist. A file skipped by one and read by the other goes
-    // on the checklist with nothing compiled to drive it, so every path of it stays unticked.
+    // on the checklist with nothing compiled to exercise it, so every path of it stays unticked.
     var threaded = std.Io.Threaded.init(std.testing.allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();

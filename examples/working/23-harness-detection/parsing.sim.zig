@@ -1,4 +1,4 @@
-// A file that imports the framework, which is what makes it harness code: it drives the run rather
+// A file that imports the framework, which is what makes it harness code: it exercises the run rather
 // than being measured by it, so it is given no checklist of its own however many functions it
 // declares. Nothing lists which files are harness, so nothing goes stale when one is added.
 

@@ -1,8 +1,7 @@
 Fault testing the Zig source in 38-incomplete-coverage.
 
 Deterministic simulation of 1 package. The report comes at the end.
-  Read 2 source files, with 1 function to drive.
-  .: scenarios first, then every function from its own types.
+  Read 2 source files, with 1 function to exercise.
   Reading what those calls reached.
   .: sweeping 32 seeds.
 
@@ -11,7 +10,7 @@ Deterministic simulation
   rounding.zig
     MISS upTo                               6/7 paths
 
-  Found 1 source file, tested 1, drove 1 function and executed 6 of 7 paths.
+  Found 1 source file, tested 1, exercised 1 function and executed 6 of 7 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Stepped over 3 calls, 0 of them after 5s of processor time without returning and the rest for crashing on an input the function was never written for. The paths they would have covered are not in the count above.
   Swept 32 seeds, with no crash and every recovery invariant holding.
@@ -19,7 +18,7 @@ Deterministic simulation
 
 
   FAIL 1 code path that nothing reached:
-      rounding.zig:22 "upTo-the-one-number-nothing-reaches" in upTo: annotated, but rounding.sim.zig never drove it.
+      rounding.zig:22 "upTo-the-one-number-nothing-reaches" in upTo: annotated, but rounding.sim.zig never exercised it.
 
   One thing to do:
     Write a scenario reaching "upTo-the-one-number-nothing-reaches" at rounding.zig:22 in upTo. Nothing the run made up got there.

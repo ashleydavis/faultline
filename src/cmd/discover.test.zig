@@ -437,7 +437,7 @@ test "a walk leaves out a directory the project excluded" {
 
 test "detection leaves out a directory the project excluded" {
     // A benchmark directory holds code, so detection takes it for source and asks for every one of
-    // its paths to be covered. It drives the code rather than being the code driven.
+    // its paths to be covered. It exercises the code rather than being the code exercised.
     var tree = try Tree.create(std.testing.allocator, "excluded-detection");
     defer tree.destroy();
 
@@ -456,7 +456,7 @@ test "detection leaves out a directory the project excluded" {
 test "the generated root carries the excluded names into the run" {
     // The build uses them to decide what to compile in; the run walks the tree again to read the
     // source a checklist is built from. Without them there, that second walk builds a checklist for
-    // a file nothing was compiled to drive, and the run asks for paths no scenario can ever reach.
+    // a file nothing was compiled to exercise, and the run asks for paths no scenario can ever reach.
     var tree = try Tree.create(std.testing.allocator, "excluded-in-root");
     defer tree.destroy();
 
@@ -481,7 +481,7 @@ test "a file naming the testing allocator outside a test cannot be built into th
     try std.testing.expect(try discover.usesTestingOutsideTests(std.testing.allocator, tree.io, tree.dir, "support.zig"));
 }
 
-test "a file naming the testing allocator only inside its tests is code to drive" {
+test "a file naming the testing allocator only inside its tests is code to exercise" {
     var tree = try Tree.create(std.testing.allocator, "testing-allocator-inside");
     defer tree.destroy();
 
@@ -522,7 +522,7 @@ test "a function that reflects on its own type parameter is named so the run lea
     try tree.write("generic.zig",
         \\const std = @import("std");
         \\
-        \\// Only ever a return type, so a stand-in works and the run can drive it.
+        \\// Only ever a return type, so a stand-in works and the run can exercise it.
         \\pub fn passThrough(comptime ReturnT: type, value: ReturnT) ReturnT {
         \\    return value;
         \\}
@@ -548,7 +548,7 @@ test "a function that reflects on its own type parameter is named so the run lea
         \\}
         \\
         \\// Hands the parameter to a function in this file that only names it as a return type,
-        \\// so the stand-in reaches the bottom unread and this can be driven.
+        \\// so the stand-in reaches the bottom unread and this can be exercised.
         \\pub fn passItOn(comptime ReturnT: type, value: ReturnT) ReturnT {
         \\    return passThrough(ReturnT, value);
         \\}

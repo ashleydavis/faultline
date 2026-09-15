@@ -160,7 +160,7 @@ mkdir -p "$RESULT_DIR"
 normalise() {
     sed -E \
         -e "s|$REPO_DIR/||g" \
-        -e '/^ +[0-9]+ calls driven$/d' \
+        -e '/^ +[0-9]+ calls exercised$/d' \
         -e '/^ +took [0-9]+(m [0-9]+)?s$/d' \
         -e 's/, [0-9]+ calls//' \
         -e 's/, [0-9]+\.[0-9]+s//' \

@@ -1,6 +1,6 @@
 // Tests for the in-memory filesystem a simulation runs against.
 //
-// Every one of them drives it through `std.Io.Dir` and `std.Io.File` rather than through the entries
+// Every one of them exercises it through `std.Io.Dir` and `std.Io.File` rather than through the entries
 // directly, because what matters is that code written against the real filesystem works unchanged
 // when this one is underneath it.
 
@@ -188,7 +188,7 @@ test "an absolute path names itself rather than hanging off the working director
 }
 
 test "a read-only directory refuses a new file, and allows one again when it is not" {
-    // The code a run drives has a branch for a directory it cannot write into. Nothing reaches it
+    // The code a run exercises has a branch for a directory it cannot write into. Nothing reaches it
     // if permission is always given, which is why this filesystem honours permissions rather than
     // recording them.
     var fake: Fake = undefined;

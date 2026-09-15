@@ -1,7 +1,7 @@
 // Where a run's own report goes.
 //
 // One place, so it can be pointed somewhere other than the terminal. It goes to stderr for a real
-// run, and nowhere in a test build: the framework's own tests drive failing runs on purpose to
+// run, and nowhere in a test build: the framework's own tests exercise failing runs on purpose to
 // prove the reporting works, and each one prints a page of report. Left alone, `zig build test`
 // buries its result under several of those and reads like a catastrophe when every test passed.
 //

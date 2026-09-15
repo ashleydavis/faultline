@@ -1,4 +1,4 @@
-// Code driven once per seed, against the world that seed built.
+// Code exercised once per seed, against the world that seed built.
 
 const std = @import("std");
 const faultline = @import("log");

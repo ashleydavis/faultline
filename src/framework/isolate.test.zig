@@ -71,7 +71,7 @@ test "restarting steps over what killed the child and keeps the rest" {
         collected.deinit(std.testing.allocator);
     }
 
-    const skipped = try isolate.driveUntilDone(dieOnTheSecond, &collected, std.testing.allocator);
+    const skipped = try isolate.exerciseUntilDone(dieOnTheSecond, &collected, std.testing.allocator);
     defer std.testing.allocator.free(skipped);
 
     // The one that died is stepped over, and the two either side of it are kept.
@@ -98,16 +98,4 @@ test "elapsed reads as seconds under a minute and as minutes and seconds above o
     try std.testing.expectEqualStrings("59s", isolate.elapsedText(&buffer, 59 * std.time.ns_per_s));
     try std.testing.expectEqualStrings("1m 0s", isolate.elapsedText(&buffer, 60 * std.time.ns_per_s));
     try std.testing.expectEqualStrings("2m 14s", isolate.elapsedText(&buffer, 134 * std.time.ns_per_s));
-}
-
-test "the progress line names the function and never the file it is in" {
-    var buffer: [256]u8 = undefined;
-    try std.testing.expectEqualStrings(", now in formatFileSize", isolate.whereText(&buffer, "src/lib/format.zig\tformatFileSize"));
-}
-
-test "nothing is said about where the calls are until a function has been named" {
-    var buffer: [256]u8 = undefined;
-    try std.testing.expectEqualStrings("", isolate.whereText(&buffer, null));
-    try std.testing.expectEqualStrings("", isolate.whereText(&buffer, "src/lib/format.zig"));
-    try std.testing.expectEqualStrings("", isolate.whereText(&buffer, "src/lib/format.zig\t"));
 }

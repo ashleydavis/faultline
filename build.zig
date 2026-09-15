@@ -4,7 +4,7 @@ const discover = @import("src/cmd/discover.zig");
 // Faultline's build. It produces two modules and one executable.
 //
 // The modules are what a repository being measured compiles against: `sim`, the framework that
-// drives every function and injects every fault, and `log`, the channel a function sends its
+// exercises every function and injects every fault, and `log`, the channel a function sends its
 // annotations down. The executable is `flt`, which finds what to measure, generates the root file,
 // compiles the simulation binary and runs it.
 pub fn build(b: *std.Build) void {
@@ -93,7 +93,7 @@ pub fn build(b: *std.Build) void {
 
     // `ReleaseSafe` as well as the default, because the simulation binary a run compiles is built
     // `ReleaseSafe`, and a check that only ever runs in `Debug` has not checked the build that
-    // actually drives anybody's code.
+    // actually exercises anybody's code.
     const release_sim_module = b.createModule(.{
         .root_source_file = b.path("src/framework/sim.zig"),
         .target = target,
@@ -181,7 +181,7 @@ pub const FaultTestOptions = struct {
 
     // Directory names to leave out of the walk. A project's benchmarks and its test harnesses are
     // code, so the walk takes them for source and asks for every one of their paths to be covered.
-    // A harness drives the code rather than being the code driven, and nothing in a tree says which
+    // A harness exercises the code rather than being the code exercised, and nothing in a tree says which
     // is which, so name them here.
     exclude: []const []const u8 = &.{},
 
@@ -245,7 +245,7 @@ pub fn addFaultTest(b: *std.Build, options: FaultTestOptions) void {
         copyZigFiles(b, written, io, project, file.directory);
     }
 
-    // Said before the compile, because the walk has already decided what will be driven and a
+    // Said before the compile, because the walk has already decided what will be exercised and a
     // reader watching a build wants to know which tree it is looking at.
     std.debug.print("Fault testing the Zig source in {s}.\n", .{std.fs.path.basename(project_root)});
 
@@ -278,7 +278,7 @@ pub fn addFaultTest(b: *std.Build, options: FaultTestOptions) void {
     });
 
     // The run stands in a directory of its own, never in the project, because the functions it
-    // drives are the project's own and a project's own code creates files where it is standing.
+    // exercises are the project's own and a project's own code creates files where it is standing.
     const sandbox = b.cache_root.join(b.allocator, &.{"flt-sandbox"}) catch @panic("OOM");
     std.Io.Dir.cwd().createDirPath(io, sandbox) catch @panic("flt: the sandbox cannot be made");
 

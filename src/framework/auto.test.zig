@@ -84,7 +84,7 @@ test "a tagged union is buildable when one of its variants is, and untagged neve
     try std.testing.expect(!(comptime auto.canMakeValue(Untagged, FakeLog, NoFactories)));
 }
 
-test "canDrive refuses a function taking something the run cannot build" {
+test "canExercise refuses a function taking something the run cannot build" {
     const Takes = struct {
         fn ordinary(value: u32, log: FakeLog) void {
             _ = value;
@@ -95,8 +95,8 @@ test "canDrive refuses a function taking something the run cannot build" {
             _ = context;
         }
     };
-    try std.testing.expect(comptime auto.canDrive(@TypeOf(Takes.ordinary), FakeLog, NoFactories));
-    try std.testing.expect(!(comptime auto.canDrive(@TypeOf(Takes.erased), FakeLog, NoFactories)));
+    try std.testing.expect(comptime auto.canExercise(@TypeOf(Takes.ordinary), FakeLog, NoFactories));
+    try std.testing.expect(!(comptime auto.canExercise(@TypeOf(Takes.erased), FakeLog, NoFactories)));
 }
 
 test "the trial budget grows with what a function's arguments can be" {
@@ -178,15 +178,15 @@ test "the generic forms are told apart by what their parameters are" {
         }
     };
 
-    try std.testing.expect(comptime auto.canDriveGeneric(@TypeOf(Forms.withOperation)));
-    try std.testing.expect(!(comptime auto.canDriveGeneric(@TypeOf(Forms.ordinary))));
+    try std.testing.expect(comptime auto.canExerciseGeneric(@TypeOf(Forms.withOperation)));
+    try std.testing.expect(!(comptime auto.canExerciseGeneric(@TypeOf(Forms.ordinary))));
 
-    try std.testing.expect(comptime auto.canDriveInvoker(@TypeOf(Forms.invoker)));
-    try std.testing.expect(!(comptime auto.canDriveInvoker(@TypeOf(Forms.withOperation))));
-    try std.testing.expect(!(comptime auto.canDriveInvoker(@TypeOf(Forms.heldContext))));
+    try std.testing.expect(comptime auto.canExerciseInvoker(@TypeOf(Forms.invoker)));
+    try std.testing.expect(!(comptime auto.canExerciseInvoker(@TypeOf(Forms.withOperation))));
+    try std.testing.expect(!(comptime auto.canExerciseInvoker(@TypeOf(Forms.heldContext))));
 
-    try std.testing.expect(comptime auto.canDriveTypeMaker(@TypeOf(Forms.typeMaker)));
-    try std.testing.expect(!(comptime auto.canDriveTypeMaker(@TypeOf(Forms.invoker))));
+    try std.testing.expect(comptime auto.canExerciseTypeMaker(@TypeOf(Forms.typeMaker)));
+    try std.testing.expect(!(comptime auto.canExerciseTypeMaker(@TypeOf(Forms.invoker))));
 }
 
 test "building a value fills every field and reaches both sides of an optional" {
@@ -299,25 +299,25 @@ fn takesLogByPointer(log: *const FakeLog) usize {
     return 0;
 }
 
-test "a function whose every parameter can be built is driven" {
-    try std.testing.expect(comptime auto.canDrive(@TypeOf(takesOrdinaryValues), FakeLog, NoFactories));
-    try std.testing.expect(comptime auto.canDrive(@TypeOf(takesNoLog), FakeLog, NoFactories));
+test "a function whose every parameter can be built is exercised" {
+    try std.testing.expect(comptime auto.canExercise(@TypeOf(takesOrdinaryValues), FakeLog, NoFactories));
+    try std.testing.expect(comptime auto.canExercise(@TypeOf(takesNoLog), FakeLog, NoFactories));
 }
 
-test "a generic function is not driven from its signature, because nothing decides its types" {
-    try std.testing.expect(!comptime auto.canDrive(@TypeOf(takesAnything), FakeLog, NoFactories));
+test "a generic function is not exercised from its signature, because nothing decides its types" {
+    try std.testing.expect(!comptime auto.canExercise(@TypeOf(takesAnything), FakeLog, NoFactories));
 }
 
-test "a function taking a type nothing can build is not driven" {
-    try std.testing.expect(!comptime auto.canDrive(@TypeOf(takesAStore), FakeLog, NoFactories));
+test "a function taking a type nothing can build is not exercised" {
+    try std.testing.expect(!comptime auto.canExercise(@TypeOf(takesAStore), FakeLog, NoFactories));
 }
 
-test "the parameter that stopped a function being driven is named" {
+test "the parameter that stopped a function being exercised is named" {
     const stuck = comptime auto.firstUnbuildableParameter(@TypeOf(takesAStore), FakeLog, NoFactories).?;
     try std.testing.expectEqual(Store, stuck);
 }
 
-test "nothing is named for a function that can be driven" {
+test "nothing is named for a function that can be exercised" {
     try std.testing.expectEqual(
         @as(?type, null),
         comptime auto.firstUnbuildableParameter(@TypeOf(takesOrdinaryValues), FakeLog, NoFactories),
@@ -339,7 +339,7 @@ test "a function is seen to take a log by value or by pointer" {
 
 test "a value that is not a function takes no log and stops nothing" {
     try std.testing.expect(!comptime auto.takesLog(usize, FakeLog));
-    try std.testing.expect(!comptime auto.canDrive(usize, FakeLog, NoFactories));
+    try std.testing.expect(!comptime auto.canExercise(usize, FakeLog, NoFactories));
     try std.testing.expectEqual(@as(?type, null), comptime auto.firstUnbuildableParameter(usize, FakeLog, NoFactories));
 }
 

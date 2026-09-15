@@ -1,4 +1,4 @@
-// A path nothing the run makes up reaches, driven by a scenario written beside the module.
+// A path nothing the run makes up reaches, exercised by a scenario written beside the module.
 
 const faultline = @import("log");
 const Log = faultline.Log;

@@ -1,4 +1,4 @@
-// Code driven by an exploration: every point the effect can fail at is found by running once with
+// Code exercised by an exploration: every point the effect can fail at is found by running once with
 // nothing failing, and then each one is failed in turn.
 
 const std = @import("std");

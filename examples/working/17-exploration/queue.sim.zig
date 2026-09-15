@@ -1,4 +1,4 @@
-// One exploration, and the factory the automatic driving uses for the same type.
+// One exploration, and the factory the automatic exercising uses for the same type.
 //
 // An exploration is found by its signature: an allocator and an injector. The run calls it once
 // with an injector that records every point, then once more per point per way that point can fail,
@@ -13,7 +13,7 @@ const queue_mod = @import("queue.zig");
 const Fault = enum { full, read_only };
 const put_failures = sim.failuresFrom(Fault, error.PutRefused);
 
-// The store the exploration drives, which asks the injector whether this call should fail.
+// The store the exploration exercises, which asks the injector whether this call should fail.
 const Injected = struct {
     injector: *sim.Injector,
 
@@ -34,11 +34,11 @@ pub fn exploreEveryRefusal(allocator: std.mem.Allocator, injector: *sim.Injector
     _ = allocator;
     var injected = Injected{ .injector = injector };
     // No log is needed here: what the exploration proves is that the code survives every refusal,
-    // and the coverage of its branches comes from the scenarios and the automatic driving.
+    // and the coverage of its branches comes from the scenarios and the automatic exercising.
     _ = queue_mod.putAll(.{}, injected.store(), &[_]u8{ 1, 2, 3 });
 }
 
-// The factory for `Store`, so the automatic driving can call every function that takes one and tick
+// The factory for `Store`, so the automatic exercising can call every function that takes one and tick
 // their branches.
 pub const Fixed = struct {
     refuse: bool = false,

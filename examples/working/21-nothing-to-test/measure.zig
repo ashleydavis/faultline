@@ -5,7 +5,7 @@ const annotate = faultline.annotate;
 
 const shapes = @import("shapes.zig");
 
-// The one function in this example, so the run has something to drive.
+// The one function in this example, so the run has something to exercise.
 pub fn quadrant(log: Log, point: shapes.Point) u8 {
     if (point.x >= 0) {
         if (an) annotate(log, "quadrant-right", "", .{});

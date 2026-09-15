@@ -23,24 +23,24 @@ const Capture = struct {
 test "an ordinary print is written as it is given" {
     var capture: Capture = .{};
     capture.start();
-    output.print("Drove {d} calls.\n", .{7});
-    try std.testing.expectEqualStrings("Drove 7 calls.\n", capture.stop());
+    output.print("Exercised {d} calls.\n", .{7});
+    try std.testing.expectEqualStrings("Exercised 7 calls.\n", capture.stop());
 }
 
 test "a print after a progress line wipes it, so the report never lands on the end of it" {
     var capture: Capture = .{};
     capture.start();
-    output.printProgress("  Drove 7 calls.", .{});
+    output.printProgress("  Exercised 7 calls.", .{});
     output.print("Passed.\n", .{});
-    try std.testing.expectEqualStrings("  Drove 7 calls.\r\x1b[2KPassed.\n", capture.stop());
+    try std.testing.expectEqualStrings("  Exercised 7 calls.\r\x1b[2KPassed.\n", capture.stop());
 }
 
 test "one progress line wipes the one before it, so they never pile up" {
     var capture: Capture = .{};
     capture.start();
-    output.printProgress("  Drove 7 calls.", .{});
-    output.printProgress("  Drove 9 calls.", .{});
-    try std.testing.expectEqualStrings("  Drove 7 calls.\r\x1b[2K  Drove 9 calls.", capture.stop());
+    output.printProgress("  Exercised 7 calls.", .{});
+    output.printProgress("  Exercised 9 calls.", .{});
+    try std.testing.expectEqualStrings("  Exercised 7 calls.\r\x1b[2K  Exercised 9 calls.", capture.stop());
 }
 
 test "nothing is wiped when no progress line was written, so a plain run emits no escape codes" {

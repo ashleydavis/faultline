@@ -9,10 +9,10 @@ const Injection = plan_mod.Injection;
 const Invariant = @import("invariant.zig").Invariant;
 const report = @import("report.zig");
 
-// What is driven through exhaustive fault injection: one function pointer with a context beside
+// What is exercised through exhaustive fault injection: one function pointer with a context beside
 // it, the shape `std.mem.Allocator` and this repository's own `Log` already use, so a subject is
 // passed by value the same way either of them is. `run` takes the injector this run was built
-// with and drives the code under test through it, and has to leave nothing behind between calls:
+// with and exercises the code under test through it, and has to leave nothing behind between calls:
 // `exploreAll` calls it once for the clean pass and once per point and failure kind found, always
 // from the same starting state.
 pub const Subject = struct {
@@ -20,7 +20,7 @@ pub const Subject = struct {
     run: *const fn (ctx: *anyopaque, injector: *Injector) anyerror!void,
 };
 
-// What `exploreAll` is given: the subject to drive, and what "handled correctly" means for it
+// What `exploreAll` is given: the subject to exercise, and what "handled correctly" means for it
 // beyond "did not crash". A subject with nothing to check passes an empty slice.
 // How many runs this exploration injected a fault into, for a caller that wants to say so. The
 // clean pass is not counted: it fails nothing. Owned by the caller and written as the search goes,
@@ -53,7 +53,7 @@ fn runInvariants(invariants: []const Invariant, run_index: usize) !void {
     }
 }
 
-// Drives `options.subject` through every failure kind at every point its own clean run declares,
+// Exercises `options.subject` through every failure kind at every point its own clean run declares,
 // one point and one kind at a time, so the failure that comes back belongs to the point that was
 // failed. The clean pass comes first, with a recording injector that never fails
 // anything, so a crash there is the subject's own defect rather than anything this loop injected.

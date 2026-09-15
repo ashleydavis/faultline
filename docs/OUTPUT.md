@@ -20,7 +20,7 @@ $ zig build flt
 
 ```
 Deterministic simulation of 1 package. The report comes at the end.
-  Read 25 source files, with 73 functions to drive.
+  Read 25 source files, with 73 functions to exercise.
   packages/utils/src: scenarios first, then every function from its own types.
   Reading what those calls reached.
   packages/utils/src: sweeping 32 seeds.
@@ -136,7 +136,7 @@ Deterministic simulation
   packages/utils/src/wrapped_error.zig
     ok   formatErrorChain                   5/5 paths, 4 unobservable
 
-  Found 20 source files, tested 18 with 2 having nothing to test, drove 73 functions and executed 296 of 296 paths.
+  Found 20 source files, tested 18 with 2 having nothing to test, exercised 73 functions and executed 296 of 296 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Stepped over 153 calls, 2 of them after 5s of processor time without returning and the rest for crashing on an input the function was never written for. The paths they would have covered are not in the count above.
     packages/utils/src/fatal_error.zig declares no function, so there is nothing in it to test.
@@ -167,7 +167,7 @@ $ zig build flt
 Fault testing the Zig source in this directory.
 
 Deterministic simulation of 1 package. The report comes at the end.
-  Read 2 source files, with 1 function to drive.
+  Read 2 source files, with 1 function to exercise.
   .: scenarios first, then every function from its own types.
   Reading what those calls reached.
   .: sweeping 32 seeds.
@@ -177,7 +177,7 @@ Deterministic simulation
   sizing.zig
     MISS isLarge                            2/3 paths, 120 calls
 
-  Found 1 source file, tested 1, drove 1 function and executed 2 of 3 paths.
+  Found 1 source file, tested 1, exercised 1 function and executed 2 of 3 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Swept 32 seeds, with no crash and every recovery invariant holding.
   Full detail is in <work directory>/sim-coverage-report.txt.
@@ -210,7 +210,7 @@ $ zig build flt
 Fault testing the Zig source in this directory.
 
 Deterministic simulation of 1 package. The report comes at the end.
-  Read 2 source files, with 1 function to drive.
+  Read 2 source files, with 1 function to exercise.
   .: scenarios first, then every function from its own types.
   Reading what those calls reached.
   .: sweeping 32 seeds.
@@ -220,14 +220,14 @@ Deterministic simulation
   gateway.zig
     MISS opens                              2/3 paths
 
-  Found 1 source file, tested 1, drove 1 function and executed 2 of 3 paths.
+  Found 1 source file, tested 1, exercised 1 function and executed 2 of 3 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Swept 32 seeds, with no crash and every recovery invariant holding.
   Full detail is in <work directory>/sim-coverage-report.txt.
 
 
   FAIL 1 code path that nothing reached:
-      gateway.zig:18 "opens-said-the-phrase" in opens: annotated, but gateway.sim.zig never drove it.
+      gateway.zig:18 "opens-said-the-phrase" in opens: annotated, but gateway.sim.zig never exercised it.
 
   One thing to do:
     Write a scenario reaching "opens-said-the-phrase" at gateway.zig:18 in opens. Nothing the run made up got there.
@@ -253,7 +253,7 @@ $ zig build flt
 Fault testing the Zig source in this directory.
 
 Deterministic simulation of 1 package. The report comes at the end.
-  Read 2 source files, with 2 functions to drive.
+  Read 2 source files, with 2 functions to exercise.
   .: scenarios first, then every function from its own types.
   Reading what those calls reached.
   .: sweeping 32 seeds.
@@ -265,16 +265,16 @@ Deterministic simulation
 
   1 function covered every path, and is not listed above.
 
-  Found 1 source file, tested 1, drove 2 functions and executed 1 of 4 paths.
+  Found 1 source file, tested 1, exercised 2 functions and executed 1 of 4 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Swept 32 seeds, with no crash and every recovery invariant holding.
   Full detail is in <work directory>/sim-coverage-report.txt.
 
 
   FAIL 3 code paths that nothing reached:
-      store.zig:15 "valueFor:entered" in valueFor: annotated, but store.sim.zig never drove it.
-      store.zig:17 "valueFor-found" in valueFor: annotated, but store.sim.zig never drove it.
-      store.zig:20 "valueFor-missing" in valueFor: annotated, but store.sim.zig never drove it.
+      store.zig:15 "valueFor:entered" in valueFor: annotated, but store.sim.zig never exercised it.
+      store.zig:17 "valueFor-found" in valueFor: annotated, but store.sim.zig never exercised it.
+      store.zig:20 "valueFor-missing" in valueFor: annotated, but store.sim.zig never exercised it.
 
   One thing to do:
     Write a test input factory returning store.Store, which valueFor takes. Without one, valueFor at store.zig:15 cannot be called at all.
@@ -290,7 +290,7 @@ Exit code: 1.
 
 ## A run where a function has nowhere to send its annotations
 
-A function that takes no `Log` cannot annotate anything, so every one of its paths is unreachable however hard the run drives it.
+A function that takes no `Log` cannot annotate anything, so every one of its paths is unreachable however hard the run exercises it.
 
 ```sh
 $ zig build flt
@@ -300,7 +300,7 @@ $ zig build flt
 Fault testing the Zig source in this directory.
 
 Deterministic simulation of 1 package. The report comes at the end.
-  Read 2 source files, with 2 functions to drive.
+  Read 2 source files, with 2 functions to exercise.
   .: scenarios first, then every function from its own types.
   Reading what those calls reached.
   .: sweeping 32 seeds.
@@ -312,7 +312,7 @@ Deterministic simulation
 
   1 function covered every path, and is not listed above.
 
-  Found 1 source file, tested 1, drove 2 functions and executed 1 of 4 paths.
+  Found 1 source file, tested 1, exercised 2 functions and executed 1 of 4 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Swept 32 seeds, with no crash and every recovery invariant holding.
   Full detail is in <work directory>/sim-coverage-report.txt.
@@ -322,7 +322,7 @@ Deterministic simulation
 
 
   FAIL 3 code paths that nothing reached:
-      hashing.zig:14 "hashBytes:entered" in hashBytes: annotated, but hashing.sim.zig never drove it.
+      hashing.zig:14 "hashBytes:entered" in hashBytes: annotated, but hashing.sim.zig never exercised it.
       hashing.zig:16 "if:16:true" in hashBytes: this branch carries no annotation.
       hashing.zig:20 "if:20:true" in hashBytes: this branch carries no annotation.
 
@@ -377,7 +377,7 @@ $ zig build flt
 Fault testing the Zig source in this directory.
 
 Deterministic simulation of 1 package. The report comes at the end.
-  Read 2 source files, with 1 function to drive.
+  Read 2 source files, with 1 function to exercise.
   .: scenarios first, then every function from its own types.
   Reading what those calls reached.
   .: sweeping 32 seeds.
@@ -387,7 +387,7 @@ Deterministic simulation
   rounding.zig
     MISS upTo                               6/7 paths
 
-  Found 1 source file, tested 1, drove 1 function and executed 6 of 7 paths.
+  Found 1 source file, tested 1, exercised 1 function and executed 6 of 7 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Stepped over 3 calls, 0 of them after 5s of processor time without returning and the rest for crashing on an input the function was never written for. The paths they would have covered are not in the count above.
   Swept 32 seeds, with no crash and every recovery invariant holding.
@@ -395,7 +395,7 @@ Deterministic simulation
 
 
   FAIL 1 code path that nothing reached:
-      rounding.zig:23 "upTo-the-one-number-nothing-reaches" in upTo: annotated, but rounding.sim.zig never drove it.
+      rounding.zig:23 "upTo-the-one-number-nothing-reaches" in upTo: annotated, but rounding.sim.zig never exercised it.
 
   One thing to do:
     Write a scenario reaching "upTo-the-one-number-nothing-reaches" at rounding.zig:23 in upTo. Nothing the run made up got there.
@@ -421,7 +421,7 @@ $ zig build flt
 Fault testing the Zig source in this directory.
 
 Deterministic simulation of 1 package. The report comes at the end.
-  Read 3 source files, with 1 function to drive.
+  Read 3 source files, with 1 function to exercise.
   .: scenarios first, then every function from its own types.
   Reading what those calls reached.
   .: sweeping 32 seeds.

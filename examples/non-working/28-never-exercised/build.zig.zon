@@ -1,7 +1,7 @@
 .{
-    .name = .example_28_never_driven,
+    .name = .example_28_never_exercised,
     .version = "0.0.0",
-    .fingerprint = 0xcb3d2c01c9433e5d,
+    .fingerprint = 0x5325950b96b8a92d,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         // A path, because this example lives inside the faultline repository. A repository outside

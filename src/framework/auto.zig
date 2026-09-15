@@ -1,4 +1,4 @@
-// Drives a module's functions from their own types, with no scenario written for any of them. What
+// Exercises a module's functions from their own types, with no scenario written for any of them. What
 // a function takes is read off its signature at comptime and built here: the allocator, the `Io`
 // and the log the run records through, plus values for the ordinary types (integers, floats,
 // booleans, enums, optionals, slices, plain structs and pointers to them) drawn from a corpus of
@@ -197,7 +197,7 @@ pub fn Context(comptime Log: type, comptime ValueFactoryLocator: type) type {
         // room behind it, so this is supplied like the allocator rather than built from its type.
         writer: *std.Io.Writer,
 
-        // The strings the module being driven is written in terms of, which is where the exact
+        // The strings the module being exercised is written in terms of, which is where the exact
         // text a branch compares against comes from.
         literals: []const []const u8,
 
@@ -567,7 +567,7 @@ pub const crashes_before_dropping = 8;
 // Whether a function can be called from its signature alone. A generic one cannot: `anytype` and a
 // `comptime` type parameter have no value a signature decides, so something has to supply it and
 // nothing here can.
-pub fn canDrive(comptime Function: type, comptime Log: type, comptime ValueFactoryLocator: type) bool {
+pub fn canExercise(comptime Function: type, comptime Log: type, comptime ValueFactoryLocator: type) bool {
     const info = @typeInfo(Function);
     if (info != .@"fn") {
         return false;
@@ -731,10 +731,10 @@ fn callNeighbour(
     }
 }
 
-// What a run hands a parameter declared `anytype` where the function drives it as an operation:
+// What a run hands a parameter declared `anytype` where the function exercises it as an operation:
 // something to call that either answers or fails. This is the one protocol the framework knows,
 // and it knows it because it is the only thing a signature leaves room for: a parameter with no
-// type, driven by a function that calls a method on it.
+// type, exercised by a function that calls a method on it.
 //
 // Which method, and with how many arguments, is read off the calling code rather than declared
 // here: `call` taking whatever it is given is what every retrying and error-swallowing function in
@@ -783,12 +783,12 @@ fn emptyValue(comptime T: type) T {
 // paths a retrying function takes, so one stands for all of them.
 pub const operation_return = u32;
 
-// Whether a generic function is one this can drive: exactly one `comptime` parameter, which is a
+// Whether a generic function is one this can exercise: exactly one `comptime` parameter, which is a
 // type, and at most one `anytype` beside it, which is then the operation. A function wanting a
 // format string, a tuple of arguments to splice, or two different values a signature does not
 // describe is left alone: passing an operation where one of those belongs would not compile, and
 // there is no way to find that out except by trying.
-pub fn canDriveGeneric(comptime Function: type) bool {
+pub fn canExerciseGeneric(comptime Function: type) bool {
     const info = @typeInfo(Function);
     if (info != .@"fn" or !info.@"fn".is_generic or info.@"fn".is_var_args) {
         return false;
@@ -853,7 +853,7 @@ pub fn callGeneric(
 // Which parameter is which is read off their kinds in order: the `comptime type` parameters are the
 // function's own type and its return type, and the `anytype` parameters are its arguments and the
 // function itself. A call whose parameters are in another order will not compile against this,
-// which is the point at which somebody has to look rather than the run quietly driving nothing.
+// which is the point at which somebody has to look rather than the run quietly exercising nothing.
 pub fn failingCall(io: std.Io) anyerror!operation_return {
     _ = io;
     return error.SimOperationFailed;
@@ -874,7 +874,7 @@ pub fn succeedingCall(io: std.Io) anyerror!operation_return {
 // as an invoker and was called with a type where its context goes. That is not a run that finds
 // nothing: it is a compile error in the generated binary, which stops the whole repository being
 // fault tested. This framework's own `callOnce` is that signature, found by fault testing it.
-pub fn canDriveInvoker(comptime Function: type) bool {
+pub fn canExerciseInvoker(comptime Function: type) bool {
     const info = @typeInfo(Function);
     if (info != .@"fn" or !info.@"fn".is_generic or info.@"fn".is_var_args) {
         return false;
@@ -941,7 +941,7 @@ pub fn callInvoker(
     }
 }
 
-// A stand-in for something a caller reads items from one at a time, for driving a type that is
+// A stand-in for something a caller reads items from one at a time, for exercising a type that is
 // built around a source. It yields as many as it was made with and then stops, which is what
 // reaches the "ran out" side as well as the "kept going" one.
 pub fn Items(comptime Item: type) type {
@@ -959,13 +959,13 @@ pub fn Items(comptime Item: type) type {
 }
 
 // Whether this is a function that makes a type out of two others: the thing it reads from and the
-// thing it yields. The run instantiates it with a stand-in source and drives whatever comes back,
+// thing it yields. The run instantiates it with a stand-in source and exercises whatever comes back,
 // which is the only way anything inside it is ever called.
 //
 // The order is read off their positions: what it reads from first, what it yields second. A maker
 // whose parameters are the other way round will not compile against this, which is where somebody
-// has to look rather than the run quietly driving nothing.
-pub fn canDriveTypeMaker(comptime Function: type) bool {
+// has to look rather than the run quietly exercising nothing.
+pub fn canExerciseTypeMaker(comptime Function: type) bool {
     const info = @typeInfo(Function);
     if (info != .@"fn" or !info.@"fn".is_generic or info.@"fn".is_var_args) {
         return false;
@@ -987,7 +987,7 @@ pub fn canDriveTypeMaker(comptime Function: type) bool {
 }
 
 // Which parameter stops a function being callable from its signature alone, named so a run can say
-// what to write rather than leaving the function silently undriven. Null when every parameter can
+// what to write rather than leaving the function silently unexercised. Null when every parameter can
 // be built, and null for a generic function, whose problem is not a missing factory.
 pub fn firstUnbuildableParameter(comptime Function: type, comptime Log: type, comptime ValueFactoryLocator: type) ?type {
     const info = @typeInfo(Function);
@@ -1008,7 +1008,7 @@ pub fn firstUnbuildableParameter(comptime Function: type, comptime Log: type, co
 
 // Whether a function takes the log its branches would annotate through, by value or by pointer. A
 // function that does not has nowhere to send an annotation, so none of its paths can ever be
-// ticked however hard the run drives it.
+// ticked however hard the run exercises it.
 pub fn takesLog(comptime Function: type, comptime Log: type) bool {
     const info = @typeInfo(Function);
     if (info != .@"fn") {
