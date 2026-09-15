@@ -33,6 +33,41 @@ fn dieOnTheSecond(plan: isolate.Plan, out: isolate.Emitter) void {
     out.done();
 }
 
+// A child that reads through an address no mapping covers, which is the crash a call with a wild
+// argument most often ends in, and the signal the child's own handler has to catch rather than be
+// dumped on.
+fn segfaultOnTheSecond(plan: isolate.Plan, out: isolate.Emitter) void {
+    var index: usize = 1;
+    while (index <= 3) : (index += 1) {
+        if (index < plan.start or plan.isSkipped(index)) {
+            continue;
+        }
+        out.at(index);
+        if (index == 2) {
+            const nowhere: *volatile u8 = @ptrFromInt(8);
+            nowhere.* = 1;
+        }
+        out.name(0, "reached");
+    }
+    out.done();
+}
+
+test "a child that segfaults is stepped over the same as one that aborts" {
+    var collected: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (collected.items) |line| std.testing.allocator.free(line);
+        collected.deinit(std.testing.allocator);
+    }
+
+    const found = try isolate.attempt(.{}, segfaultOnTheSecond, &collected, std.testing.allocator);
+
+    try std.testing.expect(!found.finished);
+    try std.testing.expect(found.killed);
+    try std.testing.expect(!found.stalled);
+    try std.testing.expectEqual(@as(usize, 2), found.last_index);
+    try std.testing.expectEqual(@as(usize, 1), collected.items.len);
+}
+
 test "a child that finishes hands back everything it said" {
     var collected: std.ArrayList([]const u8) = .empty;
     defer {

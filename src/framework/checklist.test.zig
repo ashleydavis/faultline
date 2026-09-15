@@ -102,7 +102,7 @@ test "print says nothing when there is nothing to do" {
 
 test "print takes one item of every kind" {
     const items = [_]checklist.Item{
-        .{ .kind = .annotation, .file = "src/format.zig", .line = 34, .function = "formatFileSize", .where = "on the false side of the if" },
+        .{ .kind = .annotation, .file = "src/format.zig", .line = 34, .function = "formatFileSize", .name = "if:34:false", .where = "on the false side of the if" },
         .{ .kind = .scenario, .file = "src/format.zig", .line = 59, .function = "formatFileSize", .name = "one-decimal" },
         .{ .kind = .value_factory, .file = "src/store.zig", .line = 21, .function = "openStore", .type_name = "Database" },
         .{ .kind = .log_parameter, .file = "src/hash.zig", .line = 12, .function = "hashBytes", .paths = 6 },
@@ -114,7 +114,7 @@ test "print takes one item of every kind" {
     // One line per item, under a heading that counts them, and every line carries the file it is
     // about so it can be acted on without the rest of the report being read.
     try std.testing.expect(std.mem.indexOf(u8, text, "Five things to do:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "Add an annotation to src/format.zig:34") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "Put the body of the if at src/format.zig:34 on its own line, or add an annotation on the false side of the if, in formatFileSize.") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Write a scenario reaching \"one-decimal\" at src/format.zig:59") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Write a test input factory returning Database") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "Give hashBytes at src/hash.zig:12 a Log parameter") != null);
@@ -127,7 +127,7 @@ test "print takes one item of every kind" {
 test "past the limit the rest are counted and the report file is named" {
     var many: [checklist.terminal_limit + 3]checklist.Item = undefined;
     for (&many) |*item| {
-        item.* = .{ .kind = .annotation, .file = "src/wide.zig", .line = 1, .function = "wide", .where = "on the false side of the if" };
+        item.* = .{ .kind = .annotation, .file = "src/wide.zig", .line = 1, .function = "wide", .name = "if:1:false", .where = "on the false side of the if" };
     }
 
     const text = try printed(std.testing.allocator, &many, "report.txt");
@@ -140,7 +140,7 @@ test "past the limit the rest are counted and the report file is named" {
     var lines: usize = 0;
     var walk = std.mem.splitScalar(u8, text, '\n');
     while (walk.next()) |line| {
-        if (std.mem.startsWith(u8, line, "    Add an annotation")) {
+        if (std.mem.startsWith(u8, line, "    Put the body of the if")) {
             lines += 1;
         }
     }
@@ -176,4 +176,33 @@ test "nothing to do shows nothing and holds nothing back" {
 
     try std.testing.expectEqual(@as(usize, 0), split.shown);
     try std.testing.expectEqual(@as(usize, 0), split.held_back);
+}
+
+test "bodyOf names the body a synthesized name is about, and nothing for a hand-written one" {
+    try std.testing.expectEqualStrings("the if", checklist.bodyOf("if:9:true").?);
+    try std.testing.expectEqualStrings("the switch arm", checklist.bodyOf("switch:12:.a").?);
+    try std.testing.expectEqualStrings("the loop", checklist.bodyOf("loop:3:body").?);
+    try std.testing.expectEqualStrings("the catch", checklist.bodyOf("catch:5:taken").?);
+    try std.testing.expectEqualStrings("the orelse", checklist.bodyOf("orelse:6:taken").?);
+    try std.testing.expect(checklist.bodyOf("cache-miss") == null);
+    try std.testing.expect(checklist.bodyOf("try:4:failed") == null);
+}
+
+test "an annotation item says to move the body or annotate it, and a counted side says to annotate the true side" {
+    const allocator = std.testing.allocator;
+    const items = [_]checklist.Item{
+        .{ .kind = .annotation, .file = "sizing.zig", .line = 9, .function = "isLarge", .name = "if:9:true", .where = "on the true side of the if" },
+        .{ .kind = .annotation, .file = "counting.zig", .line = 11, .function = "countLarge", .name = "if:11:false", .where = "on the false side of the if", .counting = true },
+        .{ .kind = .line_table, .file = "folded.zig", .line = 4, .function = "fold", .name = "if:4:true", .where = "on the true side of the if" },
+    };
+    const text = try printed(allocator, &items, "report.txt");
+    defer allocator.free(text);
+
+    try std.testing.expect(std.mem.indexOf(u8, text, "Put the body of the if at sizing.zig:9 on its own line, or add an annotation on the true side of the if, in isLarge.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "Add an annotation on the true side of the if at counting.zig:11 in countLarge, so the false side can be counted.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "The build carried no code for folded.zig:4 (on the true side of the if in fold), so line coverage cannot see it. Add an annotation there.") != null);
+    // The line-table item comes after the annotation items and before any scenario.
+    const annotation_at = std.mem.indexOf(u8, text, "Add an annotation on the true side").?;
+    const line_table_at = std.mem.indexOf(u8, text, "The build carried no code").?;
+    try std.testing.expect(annotation_at < line_table_at);
 }

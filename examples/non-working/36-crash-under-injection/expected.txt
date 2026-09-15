@@ -2,17 +2,29 @@ Fault testing the Zig source in 36-crash-under-injection.
 
 Deterministic simulation of 1 package. The report comes at the end.
   Read 2 source files, with 1 function to exercise.
+  Round 1: exercising 1 function under kcov.
 thread panic: index out of bounds: index 0, len 0
 examples/non-working/36-crash-under-injection/<cache>/buffer.zig:10:18: in firstOf (flt-sim)
     return values[0];
+examples/non-working/36-crash-under-injection/<cache>/buffer.sim.zig:20:27: in exploreEveryRefusal (flt-sim)
+    _ = buffer_mod.firstOf(filled);
+            try exploration(self.allocator, injector);
             options.subject.run(options.subject.ctx, &injecting) catch |err| {
+            try exploreAll(allocator, .{
+            try exploreEvery(namespaceOf(entry), allocator, counts);
+    try exploreEvery(Namespace, allocator, &counts);
+            return everyExploration(Namespace, allocator);
         run.faults_injected += try package.simulation.explore(allocator);
+        return runWorkerRound(allocator, init, args, packages);
+            runRepository(init, &Root.packages) catch |err| {
 <zig>/lib/std/start.zig:699:88: in callMain (flt-sim)
     if (fn_info.params[0].type.? == std.process.Init.Minimal) return wrapMain(root.main(.{
 <zig>/lib/std/start.zig:190:5: in _start (flt-sim)
     asm volatile (switch (native_arch) {
+kcov: Process exited with signal 6 (SIGABRT) at 0x106a646
+The run failed in round 1; what it printed is above.
 flt
 +- run exe flt-sim failure
-error: process terminated with signal ABRT
-failed command: cd .zig-cache/flt-sandbox && ./<cache>/flt-sim --repository examples/non-working/36-crash-under-injection --report <cache>/sim-coverage-report.txt
+error: process exited with error code 1
+failed command: cd .zig-cache/flt-sandbox && ./<cache>/flt-sim --repository examples/non-working/36-crash-under-injection --report <cache>/sim-coverage-report.txt --kcov-out examples/non-working/36-crash-under-injection/.zig-cache/flt-kcov --sources-root ./<cache>
 

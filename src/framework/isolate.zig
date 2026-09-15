@@ -304,28 +304,63 @@ pub fn panicQuietlyInChild(message: []const u8, first_trace_address: ?usize) nor
 // The core dump is the expensive one. `/proc/sys/kernel/core_pattern` pipes to a crash reporter, and
 // the kernel runs it whatever the core size limit is set to, so every crash paid for a copy of the
 // child's memory being written to a program that reads it and throws it away. Measured on
-// 2026-09-11: 1.07s per crash with it, 0.4ms without. Saying the child is not to be dumped is what
-// stops it; the limit is not.
+// 2026-09-11: 1.07s per crash with it, 0.4ms without.
 //
 // The signal handlers are the other. The standard library installs its own for the crash signals,
 // and each resolves a stack trace before it exits, which nothing here reads: the child's error
-// output goes nowhere. Put back the way the kernel has them, a crash is a dead process and the
-// parent learns about it from the pipe closing.
+// output goes nowhere.
 //
-// Only the child does either. In the parent these mean a defect in the run itself, and the dump and
+// Both are answered the same way: the child catches each crash signal in a handler that does
+// nothing but leave. A process that leaves is never dumped, so the reporter never runs, and no
+// trace is built. The parent learns about the crash from the child ending without saying it was
+// done, exactly as it did when the child was killed by the signal.
+//
+// It used to say the child was not to be dumped instead (`PR_SET_DUMPABLE`), and leave the signals
+// at their defaults. That flag also tells the kernel to refuse a tracer's reads and writes into the
+// child, and kcov is a tracer: under it a breakpoint the child hit could never be cleared, so the
+// child trapped on the same instruction millions of times until the parent gave up on it. Measured
+// on 2026-09-15 against the if-else example: 63s and two calls stepped over as stuck, against
+// under a second bare.
+//
+// Only the child does this. In the parent a crash means a defect in the run itself, and the dump and
 // the trace are how it is found.
 fn letCrashesBeCrashes() void {
-    _ = linux.prctl(@intFromEnum(linux.PR.SET_DUMPABLE), 0, 0, 0, 0);
-
-    const restored: linux.Sigaction = .{
-        .handler = .{ .handler = linux.SIG.DFL },
-        .mask = linux.sigemptyset(),
+    // The handler runs on a stack of its own, because one of the crashes it catches is running out
+    // of stack, and a handler with nowhere to run is not run: the kernel kills the process the
+    // default way, which is the dump this exists to avoid.
+    const alternate: linux.stack_t = .{
+        .sp = &crash_stack,
         .flags = 0,
+        .size = crash_stack.len,
     };
-    const crashes = [_]linux.SIG{ .SEGV, .BUS, .ILL, .FPE, .TRAP };
+    _ = linux.sigaltstack(&alternate, null);
+
+    const leaving: linux.Sigaction = .{
+        .handler = .{ .handler = &leaveOnCrash },
+        .mask = linux.sigemptyset(),
+        .flags = linux.SA.ONSTACK,
+    };
+    // `ABRT` is on the list because `std.process.abort` raises it, and an abort is dumped the same
+    // way a segfault is.
+    const crashes = [_]linux.SIG{ .SEGV, .BUS, .ILL, .FPE, .TRAP, .ABRT };
     for (crashes) |signal| {
-        _ = linux.sigaction(signal, &restored, null);
+        _ = linux.sigaction(signal, &leaving, null);
     }
+}
+
+// Where the crash handler runs. The size is the standard library's own recommended signal stack,
+// which is enough for a handler that makes one system call and nothing else. Static rather than
+// allocated, because the child is forked from a parent that never runs the handler, and a copy per
+// child costs nothing until the child writes to it.
+var crash_stack: [linux.SIGSTKSZ]u8 align(16) = undefined;
+
+// What the child exits with when a call crashed it. Distinct from `stalled_exit_code` so the
+// parent's reading of the two stays apart, and non-zero so a child that crashed is never taken
+// for one that finished.
+const crashed_exit_code = 101;
+
+fn leaveOnCrash(_: linux.SIG) callconv(.c) void {
+    linux.exit_group(crashed_exit_code);
 }
 
 // Arms the signal a call going round forever ends on. Its default is to kill the process, which
@@ -557,6 +592,19 @@ fn addTiming(key: []const u8, nanos: u64, calls: usize, allocator: std.mem.Alloc
 // functions were first reached.
 pub fn everyTiming() []const Timing {
     return timings.items;
+}
+
+// Adds what a worker round timed to this process's own table, so a run whose exercising happened in
+// other processes reports it the same way. Keyed the way the child names a function.
+pub fn addTimingFrom(file: []const u8, function_name: []const u8, nanos: u64, calls: usize, allocator: std.mem.Allocator) !void {
+    const key = try std.fmt.allocPrint(allocator, "{s}\t{s}", .{ file, function_name });
+    defer allocator.free(key);
+    try addTiming(key, nanos, calls, allocator);
+}
+
+// Adds a worker round's stalled calls to this process's own count, for the same reason.
+pub fn addStalled(count: usize) void {
+    calls_stalled += count;
 }
 
 // How long one function's exercising took, for whoever is printing a line about it. Zero for a

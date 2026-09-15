@@ -1,7 +1,7 @@
 Fault testing the Zig source in 39-module-not-supplied.
 flt
 +- run exe flt-sim
-   +- compile exe flt-sim ReleaseSafe native 1 errors
+   +- compile exe flt-sim Debug native 1 errors
 <cache>/uuid.zig:8:25: error: no module named 'shortid' available within module 'root'
 const shortid = @import("shortid");
 referenced by:

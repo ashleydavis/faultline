@@ -2,9 +2,11 @@ Fault testing the Zig source in 45-two-packages.
 
 Deterministic simulation of 2 packages. The report comes at the end.
   Read 2 source files, with 2 functions to exercise.
-  Reading what those calls reached.
+  Round 1: exercising 2 functions under kcov.
   src/numbers: sweeping 32 seeds.
   src/text: sweeping 32 seeds.
+  Round 1 ticked 8 paths; 0 functions still have a path to reach.
+  Reading what those calls reached.
 
 Deterministic simulation
 
@@ -14,10 +16,12 @@ Deterministic simulation
   Found 2 source files, tested 2, exercised 2 functions and executed 8 of 8 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Swept 64 seeds, with no crash and every recovery invariant holding.
+  Ran 1 round under kcov.
   Full detail is in <cache>/sim-coverage-report.txt.
 
-  2 branches are not counted above, because nothing can observe them: a `try`,
-  `and` or `or` has nowhere to put an annotation.
+  2 branches are not counted above, because no line, no annotation and no count can prove
+  them: a `try`, `and` or `or` has no line of its own, and the false side of an `if` whose
+  true side carries on has no line the true side does not share.
 
 
   Coverage: 8 of 8 paths, 100%.

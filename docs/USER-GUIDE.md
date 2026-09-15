@@ -29,6 +29,31 @@ const your_module = b.addModule("yourproject", .{
 
 Give Faultline that same `your_imports`. It builds your code into a test program of its own, and that will not compile unless it has the modules your code imports. If one is missing, Faultline tells you which.
 
+### Install kcov
+
+Faultline reads which lines of your code ran from [kcov](https://github.com/SimonKagstrom/kcov), a program that watches a binary from outside through its debug information. That is how it knows a branch ran without you writing anything into it.
+
+Install it from your distribution where it has a package:
+
+```sh
+sudo apt install kcov
+```
+
+Where it has none, build it from source. It needs cmake, a C++ compiler, and the development packages for elfutils (`libdw`), libcurl, zlib and OpenSSL. On Debian and Ubuntu those are `cmake`, `g++`, `libdw-dev`, `libelf-dev`, `libcurl4-openssl-dev`, `zlib1g-dev` and `libssl-dev`.
+
+```sh
+curl -L https://github.com/SimonKagstrom/kcov/archive/refs/tags/v43.tar.gz | tar xz
+cd kcov-43
+mkdir build && cd build
+cmake -DCMAKE_INSTALL_PREFIX="$HOME/.local" ..
+make
+make install
+```
+
+That puts `kcov` in `~/.local/bin`. Faultline finds it on the PATH, or you name it with `-Dkcov=<path>`.
+
+kcov is optional. A run without it says so in one line and reads coverage from annotations alone. With it, a path is ticked by its line running or by its annotation, whichever comes back, so annotations and kcov mix however you like.
+
 ## Step 2: Run it
 
 ```sh

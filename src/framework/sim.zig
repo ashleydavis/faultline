@@ -136,10 +136,19 @@ pub const functionAtLine = coverage_mod.functionAtLine;
 pub const freeDeclarations = coverage_mod.freeDeclarations;
 
 const coverage_search_mod = @import("coverage_search.zig");
+const covered_lines = @import("covered_lines.zig");
+const handover = @import("handover.zig");
+const rounds = @import("rounds.zig");
 pub const CoverageSubject = coverage_search_mod.CoverageSubject;
 pub const ExploreCoverageOptions = coverage_search_mod.ExploreCoverageOptions;
 pub const exploreCoverage = coverage_search_mod.exploreCoverage;
 pub const CoverageCounts = coverage_search_mod.Counts;
+
+// What kcov saw run, read back off the file it writes, and the set a checklist is ticked from.
+pub const CoveredLines = covered_lines.CoveredLines;
+pub const LineSet = covered_lines.LineSet;
+pub const readCobertura = covered_lines.readCobertura;
+pub const parseCobertura = covered_lines.parseCobertura;
 
 // The whole simulation run, which is one run for the whole repository: read the arguments, list
 // the functions every package's sources declare, build a checklist for each, exercise every package's
@@ -179,6 +188,32 @@ pub const Args = struct {
     // Colour off, whatever the terminal is. `NO_COLOR` in the environment does the same, and both
     // exist because this output is read by a person at a terminal and by whatever captures a log.
     no_color: bool = false,
+
+    // Runs one round of exercising on behalf of the run that spawned it under kcov, and writes what
+    // it reached to `handover_path` instead of printing a report.
+    worker: bool = false,
+
+    // Which round a worker is running. The runner draws different arguments each round, and only
+    // the first round runs the scenarios and the seed sweep.
+    round: usize = 1,
+
+    // A file naming the functions a worker is to exercise, one `file`, `function` and `occurrence`
+    // per line. Empty means every function.
+    remaining_path: []const u8 = "",
+
+    // Where a worker writes what it reached and what it cost, for the run that spawned it to read.
+    handover_path: []const u8 = "",
+
+    // The kcov binary the run reads line coverage through: a name looked up on the PATH, or a path.
+    kcov: []const u8 = "kcov",
+
+    // Where every round's kcov output goes, one directory per round under it. Relative to where the
+    // run stands, which the build puts in its own cache.
+    kcov_out: []const u8 = "flt-kcov",
+
+    // The directory holding the copies of the repository's sources the run was compiled from, which
+    // is what kcov is told to report on. Empty means the run cannot use kcov.
+    sources_root: []const u8 = "",
 };
 
 pub fn parseArgs(args: std.process.Args) !Args {
@@ -213,6 +248,42 @@ pub fn parseArgs(args: std.process.Args) !Args {
         } else if (std.mem.eql(u8, arg, "--repository")) {
             parsed.repository = iterator.next() orelse {
                 output_mod.print("The --repository argument needs a path.\n", .{});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, arg, "--worker")) {
+            parsed.worker = true;
+        } else if (std.mem.eql(u8, arg, "--round")) {
+            const text = iterator.next() orelse {
+                output_mod.print("The --round argument needs a number.\n", .{});
+                return error.InvalidArgument;
+            };
+            parsed.round = std.fmt.parseInt(usize, text, 10) catch {
+                output_mod.print("The --round argument needs a number.\n", .{});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, arg, "--remaining")) {
+            parsed.remaining_path = iterator.next() orelse {
+                output_mod.print("The --remaining argument needs a path.\n", .{});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, arg, "--handover")) {
+            parsed.handover_path = iterator.next() orelse {
+                output_mod.print("The --handover argument needs a path.\n", .{});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, arg, "--kcov")) {
+            parsed.kcov = iterator.next() orelse {
+                output_mod.print("The --kcov argument needs a path.\n", .{});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, arg, "--kcov-out")) {
+            parsed.kcov_out = iterator.next() orelse {
+                output_mod.print("The --kcov-out argument needs a path.\n", .{});
+                return error.InvalidArgument;
+            };
+        } else if (std.mem.eql(u8, arg, "--sources-root")) {
+            parsed.sources_root = iterator.next() orelse {
+                output_mod.print("The --sources-root argument needs a path.\n", .{});
                 return error.InvalidArgument;
             };
         } else {
@@ -264,6 +335,15 @@ fn printIndividualTest(style: Style) void {
 pub var only_file: []const u8 = "";
 pub var only_function: []const u8 = "";
 
+// The functions a worker round is to exercise, or null for every function. Set from the file the
+// run that spawned the worker wrote, before anything is exercised, for the same reason as the two
+// above.
+pub var remaining: ?[]const Exercised = null;
+
+// Which round this process is running. One for an ordinary run. The runner seeds its draws from it,
+// so a later round calls every remaining function with arguments the earlier rounds did not.
+pub var round: usize = 1;
+
 // Whether a function is one this run was asked for. Every function, on a complete test run.
 pub fn isWanted(file: []const u8, function_name: []const u8) bool {
     if (only_file.len != 0 and !std.mem.eql(u8, only_file, file)) {
@@ -271,6 +351,17 @@ pub fn isWanted(file: []const u8, function_name: []const u8) bool {
     }
     if (only_function.len != 0 and !std.mem.eql(u8, only_function, function_name)) {
         return false;
+    }
+    if (remaining) |listed| {
+        var found = false;
+        for (listed) |one| {
+            if (std.mem.eql(u8, one.file, file) and std.mem.eql(u8, one.function_name, function_name)) {
+                found = true;
+            }
+        }
+        if (!found) {
+            return false;
+        }
     }
     return true;
 }
@@ -532,6 +623,20 @@ pub const UntickedPath = struct {
     function: []const u8,
     line: u32,
     name: []const u8,
+
+    // The line that would have proved it, or null where no line can: what decides whether the
+    // checklist asks for a scenario or for the body to be given a line of its own.
+    witness: ?u32 = null,
+
+    // Whether the build carried no code for `witness`, so no run could ever hit it.
+    line_missing: bool = false,
+
+    // Whether an annotation can be written in the branch.
+    marker_room: bool = true,
+
+    // Whether the path is the false side of an `if` with no `else`, which is proved by counting
+    // the true side's annotation against the function's entries.
+    counted_side: bool = false,
 };
 
 // Whether a name is one the walker synthesized for a branch that carried no annotation of its own:
@@ -584,10 +689,7 @@ pub fn printUntickedPaths(unticked: []const UntickedPath, style: Style, report_p
     // no annotations has thousands of these, and all of them on a terminal is not a report.
     for (unticked[0..@min(unticked.len, checklist_mod.terminal_limit)]) |path| {
         if (isSynthesizedName(path.name)) {
-            output_mod.print(
-                "      {s}:{d} \"{s}\" in {s}: this branch carries no annotation.\n",
-                .{ path.file, path.line, path.name, path.function },
-            );
+            output_mod.print("      {s}:{d} \"{s}\" in {s}: {s}\n", .{ path.file, path.line, path.name, path.function, reasonUnticked(path) });
             continue;
         }
         // Naming the file that has to reach it is the whole of the fix, and a reader who does not
@@ -610,6 +712,22 @@ pub fn printUntickedPaths(unticked: []const UntickedPath, style: Style, report_p
             style.reset(),
         });
     }
+}
+
+// Why a path with a synthesized name stayed unticked, in the words the report prints after it. A
+// path with a line of its own that the build has code for was reachable and not reached, which is
+// a scenario's job; the other three say what stops a line or an annotation proving it.
+pub fn reasonUnticked(path: UntickedPath) []const u8 {
+    if (path.line_missing) {
+        return "the build carried no code for its line.";
+    }
+    if (path.witness != null) {
+        return "it has a line of its own, and no call reached it.";
+    }
+    if (path.counted_side or !path.marker_room and std.mem.endsWith(u8, path.name, ":false")) {
+        return "no line of its own, and the true side carries no annotation to count against.";
+    }
+    return "no line of its own, and no annotation.";
 }
 
 // What one coverage pass found: the paths nothing reached, which fail the run, and how many
@@ -703,17 +821,52 @@ fn groupByModule(allocator: std.mem.Allocator, annotated: []const Annotated) !By
     return grouped;
 }
 
-pub fn readCoverage(
-    allocator: std.mem.Allocator,
-    exercised: []const Exercised,
-    sources: []const SourceFile,
-    annotated: []const Annotated,
-    tallies: []FunctionTally,
-    report: *std.Io.Writer.Allocating,
-) !Coverage {
-    var found: Coverage = .{ .allocator = allocator };
-    errdefer found.deinit();
+// One checklist per exercised function, built from its current source and ticked by nothing yet.
+// The caller owns them, and `freeChecklists` releases them.
+pub fn buildChecklists(allocator: std.mem.Allocator, exercised: []const Exercised, sources: []const SourceFile) ![]Checklist {
+    var built: std.ArrayList(Checklist) = .empty;
+    errdefer freeChecklistList(allocator, &built);
+    for (exercised) |spec| {
+        try built.append(allocator, try buildChecklistOccurrence(
+            allocator,
+            spec.file,
+            sourceFor(sources, spec.file),
+            spec.function_name,
+            spec.occurrence,
+        ));
+    }
+    return built.toOwnedSlice(allocator);
+}
 
+pub fn freeChecklists(allocator: std.mem.Allocator, checklists: []Checklist) void {
+    for (checklists) |*checklist| {
+        checklist.deinit();
+    }
+    allocator.free(checklists);
+}
+
+fn freeChecklistList(allocator: std.mem.Allocator, checklists: *std.ArrayList(Checklist)) void {
+    for (checklists.items) |*checklist| {
+        checklist.deinit();
+    }
+    checklists.deinit(allocator);
+}
+
+// Ticks every checklist from what the run annotated. Only what a module's own simulation file
+// annotated ticks that module's public functions: a path reached on the way through, from a
+// scenario exercising some other module, is that other module's coverage and not this one's. A
+// private function has no caller a run can reach directly, so what the runner reached through some
+// other file's public function counts for it too.
+//
+// The names are handed over in the order the run emitted them, because the false side of an `if`
+// with no `else` is decided by counting one traversal at a time. Calling this again with a longer
+// list, as each round does, changes nothing already ticked.
+pub fn tickChecklistsFromTrace(
+    allocator: std.mem.Allocator,
+    checklists: []Checklist,
+    exercised: []const Exercised,
+    annotated: []const Annotated,
+) !void {
     // What each module annotated, and what the runner reached, worked out once rather than once per
     // function. Read per function, this walked every annotation the run recorded for each of them:
     // at a quarter of a million functions' worth of names that was the larger part of the run.
@@ -726,30 +879,6 @@ pub fn readCoverage(
     var ticked_file: []const u8 = "";
 
     for (exercised, 0..) |spec, index| {
-        var checklist = try buildChecklistOccurrence(
-            allocator,
-            spec.file,
-            sourceFor(sources, spec.file),
-            spec.function_name,
-            spec.occurrence,
-        );
-        defer checklist.deinit();
-
-        // What the code annotated while it ran is the only thing that ticks a path, and only what
-        // this module's own simulation file annotated: a path reached on the way through, from a
-        // scenario exercising some other module, is that other module's coverage and not this one's.
-        //
-        // The names are kept in the order the run emitted them, and handed over together, because a
-        // loop's zero, one and many paths are decided by counting a loop's own iterations between
-        // one traversal and the next. Ticking name by name would leave every one of them unticked:
-        // no run ever emits the name of a count.
-        // A private function is reached only through a public one, which may be in another module.
-        // Nothing else can ever tick it, so the runner's reach counts wherever it came from. A
-        // public function still has to be exercised directly, which is the whole point of reading per
-        // module.
-        // What this file's own functions reached, gathered once for the whole file rather than once
-        // per function: handing every function its file's whole trace meant walking the same names
-        // again for each of them, which was most of what this cost.
         if (!std.mem.eql(u8, ticked_file, spec.file)) {
             ticked_file = spec.file;
             names.clearRetainingCapacity();
@@ -757,16 +886,49 @@ pub fn readCoverage(
         }
 
         if (spec.is_public) {
-            checklist.tickFromTrace(names.items);
+            checklists[index].tickFromTrace(names.items);
         } else {
-            // A private function has no caller a run can reach directly, so what the runner reached
-            // through some other file's public function counts too. That list is this function's
-            // own, because which of them it is depends on the function rather than the file.
             var reached: std.ArrayList([]const u8) = .empty;
             defer reached.deinit(allocator);
             try by_module.namesFor(allocator, annotated, spec.file, false, &reached);
-            checklist.tickFromTrace(reached.items);
+            checklists[index].tickFromTrace(reached.items);
         }
+    }
+}
+
+// Ticks every checklist from the lines kcov saw run, and marks the witness lines the build carried
+// no code for. Returns how many paths this ticked that were not ticked before.
+pub fn tickChecklistsFromLines(
+    checklists: []Checklist,
+    exercised: []const Exercised,
+    covered: *const CoveredLines,
+    sources_root: []const u8,
+) usize {
+    var newly: usize = 0;
+    for (exercised, 0..) |spec, index| {
+        const lines = covered.linesFor(sources_root, spec.file) orelse continue;
+        const before = checklists[index].tickedCount();
+        checklists[index].tickFromLines(lines);
+        checklists[index].markMissingLines(lines);
+        newly += checklists[index].tickedCount() - before;
+    }
+    return newly;
+}
+
+// Reads the ticked checklists back into what the report prints: the tallies, the paths nothing
+// reached, the branches no run can observe, and the whole list written to `report`.
+pub fn summariseCoverage(
+    allocator: std.mem.Allocator,
+    checklists: []Checklist,
+    exercised: []const Exercised,
+    tallies: []FunctionTally,
+    report: *std.Io.Writer.Allocating,
+) !Coverage {
+    var found: Coverage = .{ .allocator = allocator };
+    errdefer found.deinit();
+
+    for (exercised, 0..) |spec, index| {
+        const checklist = &checklists[index];
 
         var observable_total: usize = 0;
         var unobservable_here: usize = 0;
@@ -784,28 +946,48 @@ pub fn readCoverage(
         };
 
         for (checklist.paths, 0..) |path, path_index| {
-            if (checklist.ticked[path_index]) {
-                continue;
-            }
-            // A short-circuit or a `try` has no statement position for an annotation, so no run can
-            // tick it. Counted and listed rather than failing a run that could never pass.
+            if (checklist.ticked[path_index]) continue;
+            // A short-circuit or a `try` has no statement position for an annotation and no line of
+            // its own, so no run can tick it. Counted and listed rather than failing a run that could
+            // never pass.
             if (!path.observable) {
                 found.unobservable += 1;
                 continue;
             }
-            // `spec` outlives this loop and the checklist's own name is freed at the bottom of this
-            // iteration, so the name is copied rather than pointed at.
+            // `spec` outlives this loop; the checklist's own name is copied because the report keeps
+            // it after the checklists are gone.
             try found.unticked.append(allocator, .{
                 .file = spec.file,
                 .function = spec.function_name,
                 .line = path.line,
                 .name = try allocator.dupe(u8, path.name),
+                .witness = path.witness,
+                .line_missing = path.line_missing,
+                .marker_room = path.marker_room,
+                .counted_side = path.not_taken != null,
             });
         }
         checklist.report(&report.writer) catch {};
     }
 
     return found;
+}
+
+// Builds every exercised function's checklist, ticks it from what the run annotated, writes each one
+// to `report`, and fills `tallies`: the three steps above in one call, for a caller with no rounds
+// to spread them over.
+pub fn readCoverage(
+    allocator: std.mem.Allocator,
+    exercised: []const Exercised,
+    sources: []const SourceFile,
+    annotated: []const Annotated,
+    tallies: []FunctionTally,
+    report: *std.Io.Writer.Allocating,
+) !Coverage {
+    const checklists = try buildChecklists(allocator, exercised, sources);
+    defer freeChecklists(allocator, checklists);
+    try tickChecklistsFromTrace(allocator, checklists, exercised, annotated);
+    return summariseCoverage(allocator, checklists, exercised, tallies, report);
 }
 
 // Every function a run exercised, and how it went, one line each under the file it lives in.
@@ -1040,25 +1222,33 @@ pub fn countFiles(allocator: std.mem.Allocator, sources: []const SourceFile, tal
 // The last thing a run prints: where the whole report is, and then what was left out of the count
 // above and why nothing could ever have put it there. Spelled out rather than left as a word to
 // look up, since a reader seeing "320/320 executed" has to be told in the same breath.
-pub fn printCoverageFooter(seeds_swept: usize, unobservable: usize, report_path: []const u8, style: Style) void {
+pub fn printCoverageFooter(seeds_swept: usize, unobservable: usize, rounds_run: usize, report_path: []const u8, style: Style) void {
     output_mod.print(
         "  {s}Swept {d} seed{s}, with no crash and every recovery invariant holding.{s}\n",
         .{ style.dim(), seeds_swept, plural(seeds_swept), style.reset() },
     );
+    if (rounds_run != 0) {
+        output_mod.print(
+            "  {s}Ran {d} round{s} under kcov.{s}\n",
+            .{ style.dim(), rounds_run, plural(rounds_run), style.reset() },
+        );
+    }
     output_mod.print(
         "  {s}Full detail is in {s}.{s}\n",
         .{ style.dim(), report_path, style.reset() },
     );
     if (unobservable == 1) {
         output_mod.print(
-            "\n  {s}One branch is not counted above, because nothing can observe it: a `try`, `and`\n" ++
-                "  or `or` has nowhere to put an annotation.{s}\n",
+            "\n  {s}One branch is not counted above, because no line, no annotation and no count can prove it:\n" ++
+                "  a `try`, `and` or `or` has no line of its own, and the false side of an `if` whose true\n" ++
+                "  side carries on has no line the true side does not share.{s}\n",
             .{ style.yellow(), style.reset() },
         );
     } else if (unobservable != 0) {
         output_mod.print(
-            "\n  {s}{d} branches are not counted above, because nothing can observe them: a `try`,\n" ++
-                "  `and` or `or` has nowhere to put an annotation.{s}\n",
+            "\n  {s}{d} branches are not counted above, because no line, no annotation and no count can prove\n" ++
+                "  them: a `try`, `and` or `or` has no line of its own, and the false side of an `if` whose\n" ++
+                "  true side carries on has no line the true side does not share.{s}\n",
             .{ style.yellow(), unobservable, style.reset() },
         );
     }
@@ -1376,7 +1566,11 @@ pub fn traceEveryScenario(comptime Namespace: type, comptime Recorder: type, all
         collected.deinit(allocator);
     }
 
-    try traceEach(Namespace, Recorder, "", allocator, &collected);
+    // The scenarios once, on the first round: they take no argument the run draws, so a second
+    // round of them would reach exactly what the first did.
+    if (round == 1) {
+        try traceEach(Namespace, Recorder, "", allocator, &collected);
+    }
 
     // What the types alone can reach, on top of what the scenarios exercise. Nothing here is written
     // per function: every argument comes from the signature, so a function added to a package is
@@ -1833,7 +2027,11 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
             counter: *usize,
         ) void {
             const Log = logTypeOf(Recorder);
-            var prng = std.Random.Xoshiro256.init(comptime std.hash.Wyhash.hash(0, modulePaths(Namespace)[module]));
+            // Seeded from the module and the round, so the same round of the same run draws the same
+            // arguments, and a later round draws different ones for the functions it is given again.
+            // The first round's seed is the one a run always had, so a run under kcov calls every
+            // function with exactly the arguments a run without it does.
+            var prng = std.Random.Xoshiro256.init(std.hash.Wyhash.hash(round - 1, comptime modulePaths(Namespace)[module]));
 
             // One thread pool for the whole module rather than one per call. Building it is what a
             // real `Io` costs, and a call that only reads a clock pays it either way, so at four
@@ -2475,9 +2673,18 @@ pub const Run = struct {
     report_text: std.Io.Writer.Allocating,
     coverage: Coverage,
 
+    // One checklist per entry of `exercised`, built once from the source and ticked as the run goes:
+    // by lines after every round under kcov, and by annotations. Empty for a worker, which only
+    // exercises and never reads coverage.
+    checklists: []Checklist,
+
+    // How many rounds ran under kcov. Zero when kcov was not used.
+    rounds_run: usize = 0,
+
     pub fn deinit(self: *Run) void {
         self.coverage.deinit();
         self.report_text.deinit();
+        freeChecklists(self.allocator, self.checklists);
         self.allocator.free(self.tallies);
         freeExercised(self.allocator, self.exercised);
         freeSources(self.allocator, self.sources);
@@ -2507,7 +2714,7 @@ pub fn startRun(allocator: std.mem.Allocator, init: std.process.Init.Minimal, ar
     // Set before anything is exercised and before the function list is built, because both read it.
     only_file = args.only_file;
     only_function = args.only_function;
-    if (isIndividualTest()) {
+    if (isIndividualTest() and !args.worker) {
         printIndividualTest(style);
     }
 
@@ -2532,6 +2739,9 @@ pub fn startRun(allocator: std.mem.Allocator, init: std.process.Init.Minimal, ar
         seeds_swept += package.simulation.seeds.len;
     }
 
+    // A worker exercises and hands over; it never reads coverage, so it never builds a checklist.
+    const checklists = if (args.worker) try allocator.alloc(Checklist, 0) else try buildChecklists(allocator, exercised, sources);
+
     return .{
         .allocator = allocator,
         .report_path = args.report_path,
@@ -2542,6 +2752,7 @@ pub fn startRun(allocator: std.mem.Allocator, init: std.process.Init.Minimal, ar
         .tallies = tallies,
         .report_text = .init(allocator),
         .coverage = .{ .allocator = allocator },
+        .checklists = checklists,
     };
 }
 
@@ -2552,16 +2763,15 @@ pub fn startRun(allocator: std.mem.Allocator, init: std.process.Init.Minimal, ar
 pub fn checkCoverage(run: *Run, annotated: []const Annotated) !void {
     const accounting: AccountingOptions = .{ .source_files = run.sources, .registered = run.tallies };
     var coverage_error: ?anyerror = null;
-    run.coverage = readCoverage(
-        run.allocator,
-        run.exercised,
-        run.sources,
-        annotated,
-        run.tallies,
-        &run.report_text,
-    ) catch |err| blk: {
-        coverage_error = err;
-        break :blk Coverage{ .allocator = run.allocator };
+    run.coverage = blk: {
+        tickChecklistsFromTrace(run.allocator, run.checklists, run.exercised, annotated) catch |err| {
+            coverage_error = err;
+            break :blk Coverage{ .allocator = run.allocator };
+        };
+        break :blk summariseCoverage(run.allocator, run.checklists, run.exercised, run.tallies, &run.report_text) catch |err| {
+            coverage_error = err;
+            break :blk Coverage{ .allocator = run.allocator };
+        };
     };
 
     var enumeration_error: ?anyerror = null;
@@ -2640,7 +2850,7 @@ pub fn reportRun(run: *Run, elapsed_ns: i96, packages: []const Package) !void {
     defer run.allocator.free(files.untested);
 
     printTallies(run.tallies, files, run.faults_injected, run.style);
-    printCoverageFooter(run.seeds_swept, run.coverage.unobservable, run.report_path, run.style);
+    printCoverageFooter(run.seeds_swept, run.coverage.unobservable, run.rounds_run, run.report_path, run.style);
     printUntickedPaths(run.coverage.unticked.items, run.style, run.report_path);
 
     const items = try buildChecklistItems(run, packages);
@@ -2723,8 +2933,9 @@ pub fn buildChecklistItems(run: *Run, packages: []const Package) ![]const checkl
                 },
                 .log_parameter => {
                     // Only worth saying when it cost something: a function with no branch to
-                    // annotate loses nothing by having nowhere to send one.
-                    const paths = untickedPathsOf(run, shortfall.module, shortfall.function);
+                    // annotate loses nothing by having nowhere to send one, and a path a line
+                    // proves needs no annotation, so only the paths no line can prove count.
+                    const paths = annotationOnlyPathsOf(run, shortfall.module, shortfall.function);
                     if (paths == 0) {
                         continue;
                     }
@@ -2756,8 +2967,21 @@ pub fn buildChecklistItems(run: *Run, packages: []const Package) ![]const checkl
             continue;
         }
 
-        const where = try checklist_mod.whereItGoes(run.allocator, path.name);
+        // A path with a line of its own that the build has code for was reachable and not reached,
+        // whatever its name says: that is a scenario's job, the same as an annotated branch no call
+        // reached.
+        const where = if (path.witness != null and !path.line_missing) null else try checklist_mod.whereItGoes(run.allocator, path.name);
         if (where) |text| {
+            if (path.line_missing) {
+                try items.append(run.allocator, .{
+                    .kind = .line_table,
+                    .file = try run.allocator.dupe(u8, path.file),
+                    .line = path.line,
+                    .function = try run.allocator.dupe(u8, path.function),
+                    .where = text,
+                });
+                continue;
+            }
             if (std.mem.startsWith(u8, path.name, "loop:")) {
                 var already = false;
                 for (loops_named.items) |seen| {
@@ -2777,7 +3001,11 @@ pub fn buildChecklistItems(run: *Run, packages: []const Package) ![]const checkl
                 .file = try run.allocator.dupe(u8, path.file),
                 .line = path.line,
                 .function = try run.allocator.dupe(u8, path.function),
+                .name = try run.allocator.dupe(u8, path.name),
                 .where = text,
+                // The false side of an `if` with no `else` has no body to move: what proves it is
+                // the true side's annotation, counted against the function's entries.
+                .counting = !path.marker_room and std.mem.endsWith(u8, path.name, ":false"),
             });
             continue;
         }
@@ -2814,6 +3042,21 @@ fn declarationLineOf(run: *Run, module: []const u8, function_name: []const u8) ?
 }
 
 // How many of one function's paths went unticked, which is what a missing log costs it.
+// How many of a function's unticked paths only an annotation can prove: no line of their own, or a
+// line the build carried no code for. These are what a missing `Log` parameter costs.
+fn annotationOnlyPathsOf(run: *Run, module: []const u8, function_name: []const u8) usize {
+    var count: usize = 0;
+    for (run.coverage.unticked.items) |path| {
+        if (!std.mem.eql(u8, path.file, module) or !std.mem.eql(u8, path.function, function_name)) {
+            continue;
+        }
+        if (path.witness == null or path.line_missing) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
 fn untickedPathsOf(run: *Run, module: []const u8, function_name: []const u8) usize {
     for (run.tallies) |tally| {
         if (!std.mem.eql(u8, tally.file, module) or !std.mem.eql(u8, tally.function, function_name)) {
@@ -2895,6 +3138,8 @@ pub fn printUnexpectedError(err: anyerror) void {
         error.SimCoveragePathsUnticked,
         error.SimCoverageIncomplete,
         error.NothingMatched,
+        // The worker printed its own failure, and the round loop said which round it was in.
+        error.WorkerFailed,
         => {},
         else => output_mod.print("The run stopped with {t}.\n", .{err}),
     }
@@ -2952,6 +3197,13 @@ pub fn runRepository(init: std.process.Init.Minimal, packages: []const Package) 
         return;
     }
 
+    // A worker is one round of the run that spawned it: it exercises what it was given and writes
+    // what it reached to the handover file, and the run that spawned it reads coverage and prints the
+    // report. Nothing here is printed twice, because the worker prints only what happens as it goes.
+    if (args.worker) {
+        return runWorkerRound(allocator, init, args, packages);
+    }
+
     // Said before any of the work starts, and again at each stage, because all of it takes minutes
     // and the report comes at the end. A run that says nothing until then cannot be told from one
     // that has hung, which is exactly what it looked like on 2026-09-11.
@@ -2961,7 +3213,10 @@ pub fn runRepository(init: std.process.Init.Minimal, packages: []const Package) 
     // function so `--replay`, which returns above, never pays for it. Reading a clock needs an
     // `Io`, and `startRun` builds its own for reading sources and drops it, so this is one of its
     // own, used for two timestamps and nothing else.
-    var timing = std.Io.Threaded.init(allocator, .{});
+    // It also spawns kcov, which is looked up on the PATH this process was started with: an `Io`
+    // built without the environment gives a spawned process the standard library's own default
+    // PATH, which is not where a kcov installed under a home directory sits.
+    var timing = std.Io.Threaded.init(allocator, .{ .environ = init.environ });
     defer timing.deinit();
     const timing_io = timing.io();
     const started_at = std.Io.Clock.Timestamp.now(timing_io, .awake);
@@ -2975,30 +3230,49 @@ pub fn runRepository(init: std.process.Init.Minimal, packages: []const Package) 
 
     output_mod.print("  Read {d} source file{s}, with {d} function{s} to exercise.\n", .{ run.sources.len, plural(run.sources.len), run.exercised.len, plural(run.exercised.len) });
 
-    // Every package's scenarios run before anything is fault tested. What each simulation file
-    // annotated ticks that file's own module and nothing else, so a function is covered only where
-    // its own simulation exercised it.
+    // Every annotation the run recorded, from every round or from the one in-process pass. What each
+    // simulation file annotated ticks that file's own module and nothing else, so a function is
+    // covered only where its own simulation exercised it.
     var annotated: std.ArrayList(Annotated) = .empty;
     defer {
         for (annotated.items) |entry| allocator.free(entry.name);
         annotated.deinit(allocator);
     }
-    for (packages) |package| {
-        run.faults_injected += try package.simulation.explore(allocator);
 
-        // The names move into `annotated` above, which frees them; the slice they arrived in is
-        // this loop's to release either way.
-        const package_annotated = try package.simulation.trace(allocator);
-        defer allocator.free(package_annotated);
-        errdefer {
-            for (package_annotated) |entry| allocator.free(entry.name);
+    const under_kcov = runUnderKcov(allocator, timing_io, init, args, &run, &annotated) catch |err| switch (err) {
+        error.KcovMissing => false,
+        else => return err,
+    };
+
+    if (!under_kcov) {
+        for (packages) |package| {
+            run.faults_injected += try package.simulation.explore(allocator);
+
+            // The names move into `annotated` above, which frees them; the slice they arrived in is
+            // this loop's to release either way.
+            const package_annotated = try package.simulation.trace(allocator);
+            defer allocator.free(package_annotated);
+            errdefer {
+                for (package_annotated) |entry| allocator.free(entry.name);
+            }
+            try annotated.appendSlice(allocator, package_annotated);
         }
-        try annotated.appendSlice(allocator, package_annotated);
     }
 
     output_mod.print("  Reading what those calls reached.\n", .{});
     try checkCoverage(&run, annotated.items);
 
+    // Under kcov the first round swept the seeds, so a failure there has already ended the run.
+    if (!under_kcov) {
+        try sweepSeeds(allocator, packages);
+    }
+
+    const elapsed = started_at.durationTo(std.Io.Clock.Timestamp.now(timing_io, .awake));
+    try reportRun(&run, elapsed.raw.nanoseconds, packages);
+}
+
+// Every package's seed sweep, with the one command that reproduces a failure printed beside it.
+fn sweepSeeds(allocator: std.mem.Allocator, packages: []const Package) !void {
     for (packages) |package| {
         output_mod.print("  {s}: sweeping {d} seed{s}.\n", .{ package.directory, package.simulation.seeds.len, plural(package.simulation.seeds.len) });
         for (package.simulation.seeds) |seed| {
@@ -3009,9 +3283,253 @@ pub fn runRepository(init: std.process.Init.Minimal, packages: []const Package) 
             };
         }
     }
+}
 
-    const elapsed = started_at.durationTo(std.Io.Clock.Timestamp.now(timing_io, .awake));
-    try reportRun(&run, elapsed.raw.nanoseconds, packages);
+// The rounds under kcov, or `error.KcovMissing` when they cannot happen: kcov is not there to be
+// run, or the run was not told where its sources are. Either way one line says so, and the caller
+// carries on with coverage from annotations alone. Any other error ends the run. Returns true when
+// the rounds ran.
+fn runUnderKcov(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    init: std.process.Init.Minimal,
+    args: Args,
+    run: *Run,
+    annotated: *std.ArrayList(Annotated),
+) !bool {
+    if (args.sources_root.len == 0) {
+        output_mod.print("  The run was not told where its sources are, so coverage comes from annotations alone.\n", .{});
+        return error.KcovMissing;
+    }
+
+    // Absolute, because kcov reports each file by the path the compiler recorded, which is absolute,
+    // and a reported name is matched against the copy's path under this root. The build hands the
+    // root over relative to the sandbox the run stands in.
+    const sources_root = std.Io.Dir.cwd().realPathFileAlloc(io, args.sources_root, allocator) catch {
+        output_mod.print("  The sources root {s} cannot be opened, so coverage comes from annotations alone.\n", .{args.sources_root});
+        return error.KcovMissing;
+    };
+    defer allocator.free(sources_root);
+
+    const worker = std.process.executablePathAlloc(io, allocator) catch {
+        output_mod.print("  The run cannot find its own executable, so coverage comes from annotations alone.\n", .{});
+        return error.KcovMissing;
+    };
+    defer allocator.free(worker);
+
+    var worker_args: std.ArrayList([]const u8) = .empty;
+    defer worker_args.deinit(allocator);
+    try worker_args.appendSlice(allocator, &.{ "--repository", args.repository, "--report", args.report_path });
+    if (args.only_file.len != 0) {
+        try worker_args.appendSlice(allocator, &.{ "--file", args.only_file });
+    }
+    if (args.only_function.len != 0) {
+        try worker_args.appendSlice(allocator, &.{ "--function", args.only_function });
+    }
+    if (args.no_color) {
+        try worker_args.append(allocator, "--no-color");
+    }
+
+    // The environment this process was started with, handed to kcov and through it to the worker,
+    // so a bare `kcov` is looked up on the same PATH this process has rather than a built-in one.
+    var environ_map = try init.environ.createMap(allocator);
+    defer environ_map.deinit();
+
+    var state: RoundState = .{
+        .allocator = allocator,
+        .run = run,
+        .annotated = annotated,
+        .sources_root = sources_root,
+    };
+    var counts: rounds.Counts = .{};
+    rounds.runRounds(allocator, io, .{
+        .kcov = args.kcov,
+        .out_dir = args.kcov_out,
+        .sources_root = sources_root,
+        .worker = worker,
+        .worker_args = worker_args.items,
+        .environ_map = &environ_map,
+    }, state.subject(), &counts) catch |err| switch (err) {
+        error.KcovMissing => {
+            output_mod.print("  kcov is not on the PATH, so coverage comes from annotations alone. Install it, or name it with -Dkcov=<path>.\n", .{});
+            return error.KcovMissing;
+        },
+        else => return err,
+    };
+    run.rounds_run = counts.rounds_run;
+    return true;
+}
+
+// What the rounds loop reaches back into: the run's checklists, and everything the rounds have
+// annotated so far.
+const RoundState = struct {
+    allocator: std.mem.Allocator,
+    run: *Run,
+    annotated: *std.ArrayList(Annotated),
+    sources_root: []const u8,
+
+    // How many rounds have been absorbed. The first round lists every function, whatever its
+    // checklist says, so a round under kcov exercises exactly what an ordinary run does.
+    absorbed: usize = 0,
+
+    fn subject(self: *RoundState) rounds.Subject {
+        return .{ .ctx = self, .writeRemaining = writeRemaining, .absorb = absorb, .remainingCount = remainingCount };
+    }
+
+    fn writeRemaining(ctx: *anyopaque, io: std.Io, path: []const u8) anyerror!usize {
+        const self: *RoundState = @ptrCast(@alignCast(ctx));
+        var functions: std.ArrayList(handover.Function) = .empty;
+        defer functions.deinit(self.allocator);
+        for (self.run.exercised, 0..) |spec, index| {
+            if (self.absorbed != 0 and self.run.checklists[index].untickedObservableCount() == 0) {
+                continue;
+            }
+            try functions.append(self.allocator, .{ .file = spec.file, .function = spec.function_name, .occurrence = spec.occurrence });
+        }
+        try handover.writeRemaining(self.allocator, io, path, functions.items);
+        return functions.items.len;
+    }
+
+    fn absorb(ctx: *anyopaque, io: std.Io, round_dir: []const u8, handover_path: []const u8) anyerror!usize {
+        const self: *RoundState = @ptrCast(@alignCast(ctx));
+        self.absorbed += 1;
+
+        const cov_path = try std.fmt.allocPrint(self.allocator, "{s}/cov.xml", .{round_dir});
+        defer self.allocator.free(cov_path);
+        var covered = covered_lines.readCobertura(self.allocator, io, cov_path) catch |err| {
+            output_mod.print("kcov wrote no coverage file at {s}, so the round cannot be read.\n", .{cov_path});
+            return err;
+        };
+        defer covered.deinit();
+
+        var ticked = tickChecklistsFromLines(self.run.checklists, self.run.exercised, &covered, self.sources_root);
+
+        var handed = try handover.readHandover(self.allocator, io, handover_path);
+        defer handed.deinit();
+        for (handed.annotations) |entry| {
+            // The module is named the way the run's own sources are, so the source's own name is
+            // used rather than a copy: `annotated` frees its names and nothing else, the same as
+            // the in-process run, whose modules are the generated root's own literals.
+            try self.annotated.append(self.allocator, .{
+                .module = moduleNameFrom(self.run.sources, entry.module),
+                .name = try self.allocator.dupe(u8, entry.name),
+                .from_runner = entry.from_runner,
+            });
+        }
+        for (handed.timings) |entry| {
+            try isolate_mod.addTimingFrom(entry.file, entry.function, entry.nanos, entry.calls, self.allocator);
+        }
+        self.run.faults_injected += handed.counts.faults_injected;
+        calls_stepped_over += handed.counts.stepped_over;
+        isolate_mod.addStalled(handed.counts.stalled);
+
+        var before: usize = 0;
+        for (self.run.checklists) |checklist| {
+            before += checklist.tickedCount();
+        }
+        try tickChecklistsFromTrace(self.allocator, self.run.checklists, self.run.exercised, self.annotated.items);
+        var after: usize = 0;
+        for (self.run.checklists) |checklist| {
+            after += checklist.tickedCount();
+        }
+        ticked += after - before;
+        return ticked;
+    }
+
+    fn remainingCount(ctx: *anyopaque) usize {
+        const self: *RoundState = @ptrCast(@alignCast(ctx));
+        var left: usize = 0;
+        for (self.run.checklists) |checklist| {
+            if (checklist.untickedObservableCount() != 0) {
+                left += 1;
+            }
+        }
+        return left;
+    }
+};
+
+// The run's own copy of a module name a worker handed over, or an empty name when the worker named
+// a module the run did not read, which matches no function and ticks nothing.
+pub fn moduleNameFrom(sources: []const SourceFile, module: []const u8) []const u8 {
+    for (sources) |source| {
+        if (std.mem.eql(u8, source.file, module)) {
+            return source.file;
+        }
+    }
+    return "";
+}
+
+// One round, run under kcov on behalf of the run that spawned this process. Exercises what it was
+// given, sweeps the seeds on the first round, and writes what it reached and what it cost to the
+// handover file. A failure ends the process non-zero with the failure printed, exactly as the
+// in-process run prints it, and the run that spawned it stops there.
+fn runWorkerRound(allocator: std.mem.Allocator, init: std.process.Init.Minimal, args: Args, packages: []const Package) !void {
+    var threaded = std.Io.Threaded.init(allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    round = args.round;
+
+    // The module and the annotation channel share one `Exercised` type with the run, so the listed
+    // functions are turned into that and kept for as long as the runner reads them.
+    var listed: std.ArrayList(Exercised) = .empty;
+    defer listed.deinit(allocator);
+    var read_functions: []handover.Function = &.{};
+    defer handover.freeRemaining(allocator, read_functions);
+    if (args.remaining_path.len != 0) {
+        read_functions = try handover.readRemaining(allocator, io, args.remaining_path);
+        for (read_functions) |entry| {
+            try listed.append(allocator, .{ .file = entry.file, .function_name = entry.function, .occurrence = entry.occurrence });
+        }
+        remaining = listed.items;
+    }
+
+    defer isolate_mod.freeTimings(allocator);
+
+    var run = try startRun(allocator, init, args, packages);
+    defer run.deinit();
+
+    var annotated: std.ArrayList(Annotated) = .empty;
+    defer {
+        for (annotated.items) |entry| allocator.free(entry.name);
+        annotated.deinit(allocator);
+    }
+    for (packages) |package| {
+        run.faults_injected += try package.simulation.explore(allocator);
+        const package_annotated = try package.simulation.trace(allocator);
+        defer allocator.free(package_annotated);
+        errdefer {
+            for (package_annotated) |entry| allocator.free(entry.name);
+        }
+        try annotated.appendSlice(allocator, package_annotated);
+    }
+
+    if (round == 1) {
+        try sweepSeeds(allocator, packages);
+    }
+
+    // The timings are keyed the way the child named them, file and function with a tab between.
+    var timings: std.ArrayList(handover.Timing) = .empty;
+    defer timings.deinit(allocator);
+    for (isolate_mod.everyTiming()) |timing| {
+        const split = std.mem.indexOfScalar(u8, timing.key, '\t') orelse continue;
+        try timings.append(allocator, .{
+            .file = timing.key[0..split],
+            .function = timing.key[split + 1 ..],
+            .nanos = timing.nanos,
+            .calls = timing.calls,
+        });
+    }
+    var annotations: std.ArrayList(handover.Annotation) = .empty;
+    defer annotations.deinit(allocator);
+    for (annotated.items) |entry| {
+        try annotations.append(allocator, .{ .module = entry.module, .name = entry.name, .from_runner = entry.from_runner });
+    }
+    try handover.writeHandover(allocator, io, args.handover_path, annotations.items, timings.items, .{
+        .faults_injected = run.faults_injected,
+        .stepped_over = calls_stepped_over,
+        .stalled = isolate_mod.stalledCount(),
+    });
 }
 
 

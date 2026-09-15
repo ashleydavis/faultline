@@ -8,6 +8,8 @@ What a repository has to do to start using the tool, in the order it is done.
 zig fetch --save=faultline git+https://github.com/ashleydavis/faultline
 ```
 
+Faultline reads which lines ran from kcov. Install your distribution's `kcov` package, or build it from source, and Faultline finds it on the PATH or where `-Dkcov=<path>` says. Without kcov a run reads coverage from annotations alone.
+
 ## 2. Add the build step
 
 One line in your `build.zig`. It adds a step named `flt`, attaches the `annotate` module to yours, and walks your tree for what to exercise.

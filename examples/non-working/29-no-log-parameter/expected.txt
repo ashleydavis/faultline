@@ -2,40 +2,46 @@ Fault testing the Zig source in 29-no-log-parameter.
 
 Deterministic simulation of 1 package. The report comes at the end.
   Read 2 source files, with 2 functions to exercise.
-  Reading what those calls reached.
+  Round 1: exercising 2 functions under kcov.
   .: sweeping 32 seeds.
+  Round 1 ticked 5 paths; 1 function still has a path to reach.
+  Round 2: exercising 1 function under kcov.
+  Round 2 ticked 0 paths; 1 function still has a path to reach.
+  Reading what those calls reached.
 
 Deterministic simulation
 
   hashing.zig
-    MISS hashBytes                          1/3 paths
+    MISS hashBytes                          2/4 paths
 
   1 function covered every path, and is not listed above.
 
-  Found 1 source file, tested 1, exercised 2 functions and executed 4 of 6 paths.
+  Found 1 source file, tested 1, exercised 2 functions and executed 5 of 7 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Swept 32 seeds, with no crash and every recovery invariant holding.
+  Ran 2 rounds under kcov.
   Full detail is in <cache>/sim-coverage-report.txt.
 
-  2 branches are not counted above, because nothing can observe them: a `try`,
-  `and` or `or` has nowhere to put an annotation.
+  One branch is not counted above, because no line, no annotation and no count can prove it:
+  a `try`, `and` or `or` has no line of its own, and the false side of an `if` whose true
+  side carries on has no line the true side does not share.
 
 
   FAIL 2 code paths that nothing reached:
-      hashing.zig:20 "if:20:true" in hashBytes: this branch carries no annotation.
-      hashing.zig:24 "if:24:true" in hashBytes: this branch carries no annotation.
+      hashing.zig:22 "if:22:true" in hashBytes: no line of its own, and no annotation.
+      hashing.zig:24 "if:24:true" in hashBytes: no line of its own, and no annotation.
 
   Three things to do:
-    Give hashBytes at hashing.zig:18 a Log parameter. It has nowhere to send its annotations, so none of its 2 paths can be ticked.
-    Add an annotation to hashing.zig:20, on the true side of the if in hashBytes.
-    Add an annotation to hashing.zig:24, on the true side of the if in hashBytes.
+    Give hashBytes at hashing.zig:20 a Log parameter. It has nowhere to send its annotations, and 2 of its paths can be ticked only by one.
+    Put the body of the if at hashing.zig:22 on its own line, or add an annotation on the true side of the if, in hashBytes.
+    Put the body of the if at hashing.zig:24 on its own line, or add an annotation on the true side of the if, in hashBytes.
 
-  Coverage: 4 of 6 paths, 66%.
+  Coverage: 5 of 7 paths, 71%.
 
-  Failed: 2 code paths of 6 were never reached.
+  Failed: 2 code paths of 7 were never reached.
   The list above says what to do about each one.
 flt
 +- run exe flt-sim failure
 error: process exited with error code 1
-failed command: cd .zig-cache/flt-sandbox && ./<cache>/flt-sim --repository examples/non-working/29-no-log-parameter --report <cache>/sim-coverage-report.txt
+failed command: cd .zig-cache/flt-sandbox && ./<cache>/flt-sim --repository examples/non-working/29-no-log-parameter --report <cache>/sim-coverage-report.txt --kcov-out examples/non-working/29-no-log-parameter/.zig-cache/flt-kcov --sources-root ./<cache>
 

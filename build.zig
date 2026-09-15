@@ -188,11 +188,14 @@ pub const FaultTestOptions = struct {
     // The name the project's own code reads its build options from, when that is not `flt_options`.
     options_module: ?[]const u8 = null,
 
-    // What the simulation is built for and at. `ReleaseSafe` because the run's own bounds were
-    // measured against it, and a `Debug` build of the same work takes long enough to change what
-    // somebody does with the tool.
+    // What the simulation is built for and at. `Debug`, because the run reads line coverage from
+    // kcov, and the line table of a `ReleaseSafe` build keeps only the line a branch is decided on:
+    // measured on 2026-09-15 against the if-else example, the bodies, the returns and the
+    // annotation lines all had no address of their own, so no branch could be proved by a line. A
+    // project that builds otherwise still runs, and the paths whose lines the build dropped are
+    // reported as ones line coverage cannot see.
     target: ?std.Build.ResolvedTarget = null,
-    optimize: std.builtin.OptimizeMode = .ReleaseSafe,
+    optimize: std.builtin.OptimizeMode = .Debug,
 };
 
 // Adds the `flt` step to a project's own build: the walk, the wiring, the compile and the run.
@@ -269,6 +272,10 @@ pub fn addFaultTest(b: *std.Build, options: FaultTestOptions) void {
 
     const simulation = b.addExecutable(.{
         .name = "flt-sim",
+        // The LLVM backend, because kcov reads the binary's line table through libdw and gets no
+        // lines at all out of the one Zig's own x86 backend writes for a Debug build: measured on
+        // 2026-09-15, the same example reported every statement line under LLVM and none without it.
+        .use_llvm = true,
         .root_module = b.createModule(.{
             .root_source_file = root,
             .target = target,
@@ -297,6 +304,18 @@ pub fn addFaultTest(b: *std.Build, options: FaultTestOptions) void {
     else
         b.pathJoin(&.{ project_root, b.cache_root.join(b.allocator, &.{"sim-coverage-report.txt"}) catch @panic("OOM") });
     run.addArgs(&.{ "--report", report });
+
+    // What the run needs to read line coverage: the kcov binary, where its output goes, and the
+    // directory the copies of the sources were written to, which is what kcov is told to report on.
+    // The output goes in the build's own cache, beside the sandbox, for the same reason the sandbox
+    // is there: a run writes nothing into the project.
+    if (b.option([]const u8, "kcov", "The kcov binary, when it is not on the PATH")) |named| {
+        run.addArgs(&.{ "--kcov", named });
+    }
+    // Absolute for the same reason the report path is: the run stands in the sandbox.
+    run.addArgs(&.{ "--kcov-out", b.pathJoin(&.{ project_root, b.cache_root.join(b.allocator, &.{"flt-kcov"}) catch @panic("OOM") }) });
+    run.addArg("--sources-root");
+    run.addDirectoryArg(written.getDirectory());
     if (b.option([]const u8, "file", "Fault test only this file")) |only| {
         run.addArgs(&.{ "--file", only });
     }

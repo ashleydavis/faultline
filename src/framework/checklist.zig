@@ -25,6 +25,10 @@ pub const Kind = enum {
 
     // A module that would not compile because an import was not supplied.
     module,
+
+    // A branch whose proving line the build carried no code for, so line coverage can never see it
+    // and only an annotation can.
+    line_table,
 };
 
 // One thing to do. Every field that is not filled for a kind is left empty, and the printer reads
@@ -45,6 +49,11 @@ pub const Item = struct {
     // Where the annotation goes, in words, for a branch that carries none.
     where: []const u8 = "",
 
+    // For an annotation item: whether the path is the false side of an `if` with no `else`, which
+    // is proved by counting the true side's annotation against the function's entries rather than
+    // by a line or a marker of its own.
+    counting: bool = false,
+
     // The type a factory has to return, and where that type is declared.
     type_name: []const u8 = "",
     declared_at: []const u8 = "",
@@ -59,7 +68,7 @@ pub const Item = struct {
 
 // The order kinds are printed in: what stops a function being called at all comes first, because
 // nothing below it can be worked until it is done, and the branches come last.
-const kind_order = [_]Kind{ .module, .value_factory, .log_parameter, .annotation, .scenario };
+const kind_order = [_]Kind{ .module, .value_factory, .log_parameter, .annotation, .line_table, .scenario };
 
 // How a count reads at the head of the list. Written out up to twelve because "Three things to do"
 // reads as a sentence and "3 things to do" reads as a log line; past that the digits are easier to
@@ -117,6 +126,30 @@ pub fn whereItGoes(allocator: std.mem.Allocator, name: []const u8) !?[]const u8 
     // `and`, `or` and `try` have nowhere to put an annotation at all, so they are never on this
     // list. Reaching here means the walker grew a kind this has not been told about, and saying so
     // is better than printing a line nobody can act on.
+    return null;
+}
+
+// The body a synthesized name is about, in the words a sentence about moving it uses: the kind is
+// read off the front of the name the same way `whereItGoes` reads it. Null for a name written by
+// hand, which is never about a body that has to move.
+pub fn bodyOf(name: []const u8) ?[]const u8 {
+    const first = std.mem.indexOfScalar(u8, name, ':') orelse return null;
+    const kind = name[0..first];
+    if (std.mem.eql(u8, kind, "if")) {
+        return "the if";
+    }
+    if (std.mem.eql(u8, kind, "switch")) {
+        return "the switch arm";
+    }
+    if (std.mem.eql(u8, kind, "loop")) {
+        return "the loop";
+    }
+    if (std.mem.eql(u8, kind, "catch")) {
+        return "the catch";
+    }
+    if (std.mem.eql(u8, kind, "orelse")) {
+        return "the orelse";
+    }
     return null;
 }
 
@@ -185,8 +218,21 @@ pub fn print(items: []const Item, style: Style, report_path: []const u8) void {
 // what is wanted, so it can be acted on without the rest of the report being read.
 fn printOne(item: Item, style: Style) void {
     switch (item.kind) {
-        .annotation => output_mod.print(
-            "    {s}Add an annotation to {s}:{d}, {s} in {s}.{s}\n",
+        .annotation => {
+            if (item.counting) {
+                output_mod.print(
+                    "    {s}Add an annotation on the true side of the if at {s}:{d} in {s}, so the false side can be counted.{s}\n",
+                    .{ style.dim(), item.file, item.line, item.function, style.reset() },
+                );
+            } else {
+                output_mod.print(
+                    "    {s}Put the body of {s} at {s}:{d} on its own line, or add an annotation {s}, in {s}.{s}\n",
+                    .{ style.dim(), bodyOf(item.name) orelse "the branch", item.file, item.line, item.where, item.function, style.reset() },
+                );
+            }
+        },
+        .line_table => output_mod.print(
+            "    {s}The build carried no code for {s}:{d} ({s} in {s}), so line coverage cannot see it. Add an annotation there.{s}\n",
             .{ style.dim(), item.file, item.line, item.where, item.function, style.reset() },
         ),
         .scenario => output_mod.print(
@@ -198,7 +244,7 @@ fn printOne(item: Item, style: Style) void {
             .{ style.dim(), item.type_name, item.function, item.function, item.file, item.line, style.reset() },
         ),
         .log_parameter => output_mod.print(
-            "    {s}Give {s} at {s}:{d} a Log parameter. It has nowhere to send its annotations, so none of its {d} paths can be ticked.{s}\n",
+            "    {s}Give {s} at {s}:{d} a Log parameter. It has nowhere to send its annotations, and {d} of its paths can be ticked only by one.{s}\n",
             .{ style.dim(), item.function, item.file, item.line, item.paths, style.reset() },
         ),
         .module => output_mod.print(

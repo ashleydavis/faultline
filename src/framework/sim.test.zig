@@ -852,7 +852,7 @@ test "the footer and the tallies print without a terminal" {
     };
     const untested = [_][]const u8{"c.zig"};
     sim.printTallies(&tallies, .{ .found = 3, .tested = 2, .untested = &untested }, 4, .init(false));
-    sim.printCoverageFooter(32, 7, "tmp/sim-coverage-report.txt", .init(false));
+    sim.printCoverageFooter(32, 7, 0, "tmp/sim-coverage-report.txt", .init(false));
 }
 
 test "a complete test run wants every function" {
@@ -936,4 +936,123 @@ test "the walk that reads a package's source leaves out a directory the build ex
 
     try std.testing.expectEqual(@as(usize, 1), sources.len);
     try std.testing.expectEqualStrings("thing.zig", sources[0].file);
+}
+
+test "a worker exercises only the functions it was handed, and every function when handed none" {
+    sim.only_file = "";
+    sim.only_function = "";
+    const listed = [_]sim.Exercised{.{ .file = "src/a.zig", .function_name = "first" }};
+    sim.remaining = &listed;
+    defer sim.remaining = null;
+
+    try std.testing.expect(sim.isWanted("src/a.zig", "first"));
+    try std.testing.expect(!sim.isWanted("src/a.zig", "second"));
+    try std.testing.expect(!sim.isWanted("src/b.zig", "first"));
+
+    sim.remaining = null;
+    try std.testing.expect(sim.isWanted("src/a.zig", "second"));
+    try std.testing.expect(sim.isWanted("src/b.zig", "first"));
+}
+
+// What kcov would report for `fixture_source`: every statement line is code, and the run took the
+// true side of `covered` and never called `missed`.
+const fixture_cobertura =
+    \\<class name="fixture" filename="/copies/fixture.zig">
+    \\<line number="2" hits="1"/>
+    \\<line number="3" hits="1"/>
+    \\<line number="4" hits="1"/>
+    \\<line number="6" hits="0"/>
+    \\<line number="11" hits="0"/>
+    \\</class>
+;
+
+test "the checklists are ticked from the lines kcov saw run, and the count says how many that was" {
+    const allocator = std.testing.allocator;
+    const sources = [_]sim.SourceFile{.{ .file = "fixture.zig", .source = fixture_source }};
+    const exercised = try sim.everyFunction(allocator, &sources);
+    defer sim.freeExercised(allocator, exercised);
+
+    const checklists = try sim.buildChecklists(allocator, exercised, &sources);
+    defer sim.freeChecklists(allocator, checklists);
+
+    var covered = try sim.parseCobertura(allocator, fixture_cobertura);
+    defer covered.deinit();
+
+    // The entry and the true side of `covered`, whose lines ran. The false side's line and
+    // `missed`'s line were code that did not run, so they stay unticked and are not missing.
+    const ticked = sim.tickChecklistsFromLines(checklists, exercised, &covered, "/copies");
+    try std.testing.expectEqual(@as(usize, 2), ticked);
+    try std.testing.expectEqual(@as(usize, 2), checklists[0].tickedCount());
+    try std.testing.expectEqual(@as(usize, 0), checklists[1].tickedCount());
+    for (checklists[0].paths) |path| {
+        try std.testing.expect(!path.line_missing);
+    }
+
+    // Ticking again from the same lines adds nothing.
+    try std.testing.expectEqual(@as(usize, 0), sim.tickChecklistsFromLines(checklists, exercised, &covered, "/copies"));
+
+    // A file kcov never reported ticks nothing and marks nothing.
+    try std.testing.expectEqual(@as(usize, 0), sim.tickChecklistsFromLines(checklists, exercised, &covered, "/elsewhere"));
+}
+
+test "the summary reads the ticked checklists back the way readCoverage did" {
+    const allocator = std.testing.allocator;
+    const sources = [_]sim.SourceFile{.{ .file = "fixture.zig", .source = fixture_source }};
+    const exercised = try sim.everyFunction(allocator, &sources);
+    defer sim.freeExercised(allocator, exercised);
+    const tallies = try sim.initialTallies(allocator, exercised);
+    defer allocator.free(tallies);
+
+    const checklists = try sim.buildChecklists(allocator, exercised, &sources);
+    defer sim.freeChecklists(allocator, checklists);
+
+    var covered = try sim.parseCobertura(allocator, fixture_cobertura);
+    defer covered.deinit();
+    _ = sim.tickChecklistsFromLines(checklists, exercised, &covered, "/copies");
+    try sim.tickChecklistsFromTrace(allocator, checklists, exercised, &.{});
+
+    var report: std.Io.Writer.Allocating = .init(allocator);
+    defer report.deinit();
+    var found = try sim.summariseCoverage(allocator, checklists, exercised, tallies, &report);
+    defer found.deinit();
+
+    // The false side of `covered`, and the entry of `missed`: lines were read, so an entry whose line
+    // did not run is a path the run failed to reach rather than one it could not see.
+    try std.testing.expectEqual(@as(usize, 2), found.unticked.items.len);
+    try std.testing.expectEqualStrings("covered-false", found.unticked.items[0].name);
+    try std.testing.expectEqual(@as(?u32, 6), found.unticked.items[0].witness);
+    try std.testing.expectEqualStrings("missed:entered", found.unticked.items[1].name);
+    try std.testing.expectEqual(@as(usize, 0), found.unobservable);
+    try std.testing.expectEqual(@as(usize, 2), tallies[0].paths.?.ticked);
+    try std.testing.expectEqual(@as(usize, 3), tallies[0].paths.?.total);
+    try std.testing.expectEqual(@as(usize, 1), tallies[1].paths.?.total);
+    try std.testing.expect(std.mem.indexOf(u8, report.written(), "UNTICKED fixture.zig:5 \"covered-false\" line 6") != null);
+}
+
+test "the reason beside an unticked path says what would have proved it" {
+    try std.testing.expectEqualStrings(
+        "the build carried no code for its line.",
+        sim.reasonUnticked(.{ .file = "a.zig", .function = "f", .line = 3, .name = "if:3:true", .witness = 4, .line_missing = true }),
+    );
+    try std.testing.expectEqualStrings(
+        "it has a line of its own, and no call reached it.",
+        sim.reasonUnticked(.{ .file = "a.zig", .function = "f", .line = 3, .name = "if:3:true", .witness = 4 }),
+    );
+    try std.testing.expectEqualStrings(
+        "no line of its own, and the true side carries no annotation to count against.",
+        sim.reasonUnticked(.{ .file = "a.zig", .function = "f", .line = 3, .name = "if:3:false", .marker_room = false }),
+    );
+    try std.testing.expectEqualStrings(
+        "no line of its own, and no annotation.",
+        sim.reasonUnticked(.{ .file = "a.zig", .function = "f", .line = 3, .name = "if:3:true", .marker_room = true }),
+    );
+}
+
+test "a module a worker named is matched to the run's own copy of the name, or to no module" {
+    const sources = [_]sim.SourceFile{
+        .{ .file = "src/a.zig", .source = "" },
+        .{ .file = "src/b.zig", .source = "" },
+    };
+    try std.testing.expect(sim.moduleNameFrom(&sources, "src/b.zig").ptr == sources[1].file.ptr);
+    try std.testing.expectEqualStrings("", sim.moduleNameFrom(&sources, "src/c.zig"));
 }

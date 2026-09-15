@@ -2,8 +2,10 @@ Fault testing the Zig source in 27-if-with-no-else.
 
 Deterministic simulation of 1 package. The report comes at the end.
   Read 2 source files, with 1 function to exercise.
-  Reading what those calls reached.
+  Round 1: exercising 1 function under kcov.
   .: sweeping 32 seeds.
+  Round 1 ticked 3 paths; 0 functions still have a path to reach.
+  Reading what those calls reached.
 
 Deterministic simulation
 
@@ -13,6 +15,7 @@ Deterministic simulation
   Found 1 source file, tested 1, exercised 1 function and executed 3 of 3 paths.
   Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
   Swept 32 seeds, with no crash and every recovery invariant holding.
+  Ran 1 round under kcov.
   Full detail is in <cache>/sim-coverage-report.txt.
 
 

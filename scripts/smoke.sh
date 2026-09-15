@@ -97,6 +97,14 @@ if [ -z "$ZIG" ]; then
     exit 1
 fi
 
+# The tool reads line coverage from kcov, and the captures the examples are compared against were
+# made with it on the PATH. Without it the run still works, but it prints a line saying so and
+# reaches fewer paths, and every example would fail its comparison for that reason alone.
+if ! command -v kcov >/dev/null 2>&1; then
+    echo "There is no kcov on the PATH, and every example is run under it." >&2
+    exit 1
+fi
+
 EXAMPLES=()
 for KIND in working non-working; do
     if [ ! -d "examples/$KIND" ]; then
@@ -176,6 +184,7 @@ normalise() {
         -e 's|/[A-Za-z0-9_./+-]*/flt[A-Za-z0-9-]+/|<work>/|g' \
         -e 's|[A-Za-z0-9_./+-]*\.zig-cache/([A-Za-z0-9_.-]+\.txt)|<cache>/\1|g' \
         -e 's|\.\./o/[0-9a-f]+/flt-sim|<cache>/flt-sim|g' \
+        -e 's|\.\./o/[0-9a-f]+|<cache>|g' \
         -e 's|\.zig-cache/o/[0-9a-f]+/|<cache>/|g' \
         -e '/^Build Summary:/,$d' \
         -e '/^error: the following build command failed/,$d'

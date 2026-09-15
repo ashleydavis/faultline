@@ -37,17 +37,32 @@ pub const Path = struct {
     // synthesized name built from its kind, line and side.
     name: []const u8,
 
-    // Whether an annotation can be written on this branch at all. A short-circuit (`and`, `or`)
-    // and a `try` are branches with no statement position anywhere in them, so nothing can be
-    // emitted when they are taken: they are real paths, counted and listed, but no run can ever
-    // tick one, and line coverage over the built binary is what covers them instead. Every other
-    // form can hold a statement, or be written so it can, so it is observable and has to be
-    // annotated and exercised.
+    // Whether anything can ever say this path ran: a marker written in it, a count of the function's
+    // entries against its taken side, or a line of its own. A short-circuit (`and`, `or`) and a `try`
+    // have none of the three, so they are real paths, counted and listed, that no run can ever tick.
+    // Every other form is observable and has to be exercised.
     observable: bool = true,
+
+    // Whether an annotation can be written inside this branch: true for a body written as a block,
+    // false for a bare expression, a short-circuit, a `try`, and the side of an `if` that has no
+    // `else`. Kept beside `observable` so the answer can be worked out again when a witness line is
+    // taken away.
+    marker_room: bool = true,
 
     // For the side of an `if` that has no `else`: the two names a run counts to decide it ran.
     // Null for every other path.
     not_taken: ?NotTaken = null,
+
+    // The line whose execution proves this path ran, as line coverage sees it: the first statement
+    // of the branch's body, or the statement after an `if` whose taken side leaves. Null where no
+    // line proves it: a body on the same line as its own condition runs that line whether or not
+    // the branch was taken, and a short-circuit or a `try` has no line of its own at all.
+    witness: ?u32 = null,
+
+    // Whether the build carried no code for `witness`. Set by `markMissingLines` from what kcov
+    // listed, so a path an optimiser folded away is reported as one line coverage cannot see rather
+    // than one a run failed to reach.
+    line_missing: bool = false,
 };
 
 // What proves the side of an `if` that has no `else` ran, without a line being written for it.
@@ -83,6 +98,11 @@ pub const Checklist = struct {
 
     // Parallel to `paths`: whether a run has reached the path at the same index.
     ticked: []bool,
+
+    // Whether line coverage was consulted for this checklist. Until it has been, a path only a line
+    // could prove is treated the way it always was, as one no run can observe; once it has, a
+    // witness line that did not run is a path the run failed to reach.
+    lines_read: bool = false,
 
     pub fn deinit(self: *Checklist) void {
         self.allocator.free(self.function);
@@ -145,11 +165,13 @@ pub const Checklist = struct {
                     self.ticked[index] = true;
                     continue;
                 }
-                // Nothing said the function was entered, so there is no count to compare against
-                // and this side cannot be decided either way. Reported as a branch no run can
-                // observe rather than one a run missed: a caller cannot make it observable, and
-                // asking for work that does not exist is worse than not asking.
-                if (timesSaid(names, counted.entered) == 0) {
+                // No call said the function was entered, so there is no count to compare against
+                // and this side cannot be decided by counting. Where line coverage was read and a
+                // line proves it, the line has already had its say, so it stays observable;
+                // otherwise it is reported as a branch no run can observe rather than one a run
+                // missed, since a caller cannot make it observable and asking for work that does
+                // not exist is worse than not asking.
+                if (timesSaid(names, counted.entered) == 0 and !(self.lines_read and path.witness != null)) {
                     self.paths[index].observable = false;
                 }
                 continue;
@@ -159,14 +181,49 @@ pub const Checklist = struct {
         self.dropTheEntryNothingCanProve(names);
     }
 
-    // The entry path, when nothing can say the body ran: the run did not call the function itself,
-    // no branch of it came back, and the code carries no mark of its own. Left in the report and
-    // out of the count, the same as a branch with nowhere to put a mark.
+    // Ticks every path whose witness line `lines` says ran. Only a witness ticks here: a path with
+    // no line of its own is left to its annotation.
+    pub fn tickFromLines(self: *Checklist, lines: *const LineSet) void {
+        self.lines_read = true;
+        for (self.paths, 0..) |path, index| {
+            if (self.ticked[index]) {
+                continue;
+            }
+            const witness = path.witness orelse continue;
+            if (lines.isHit(witness)) {
+                self.ticked[index] = true;
+            }
+        }
+    }
+
+    // Records, for every unticked path with a witness, whether the build carried code for that line
+    // at all. A line kcov never listed has no address in the binary, so no run can ever hit it, and
+    // the report says so instead of asking for it to be reached.
+    pub fn markMissingLines(self: *Checklist, lines: *const LineSet) void {
+        for (self.paths, 0..) |*path, index| {
+            if (self.ticked[index]) {
+                continue;
+            }
+            const witness = path.witness orelse continue;
+            if (!lines.isCode(witness)) {
+                path.line_missing = true;
+            }
+        }
+    }
+
+    // The entry path, when no annotation can say the body ran: the run did not call the function
+    // itself, no branch of it came back, and the code carries no mark of its own. Left in the report
+    // and out of the count, the same as a branch with nowhere to put a mark. Where line coverage was
+    // read and the body's first line is a witness, that line has had its say already, and an entry
+    // it did not prove is one the run failed to reach rather than one it could not see.
     fn dropTheEntryNothingCanProve(self: *Checklist, names: []const []const u8) void {
         if (self.paths.len == 0 or self.ticked[entry_path]) {
             return;
         }
         if (timesSaid(names, self.paths[entry_path].name) > 0) {
+            return;
+        }
+        if (self.lines_read and self.paths[entry_path].witness != null) {
             return;
         }
         self.paths[entry_path].observable = false;
@@ -256,6 +313,18 @@ pub const Checklist = struct {
         return self.paths.len - self.untickedCount();
     }
 
+    // How many observable paths remain unticked: what a run can still reach, which is what decides
+    // whether the function is given another round.
+    pub fn untickedObservableCount(self: Checklist) usize {
+        var count: usize = 0;
+        for (self.paths, 0..) |path, index| {
+            if (path.observable and !self.ticked[index]) {
+                count += 1;
+            }
+        }
+        return count;
+    }
+
     // How many paths remain unticked, the size of the finding a search prints when it stops with
     // some still open.
     pub fn untickedCount(self: Checklist) usize {
@@ -277,10 +346,23 @@ pub const Checklist = struct {
         );
         for (self.paths, 0..) |path, index| {
             const mark = if (self.ticked[index]) "ticked" else if (!path.observable) "NO ANNOTATION POSSIBLE" else "UNTICKED";
-            try writer.print("  {s} {s}:{d} \"{s}\"\n", .{ mark, self.file, path.line, path.name });
+            try writer.print("  {s} {s}:{d} \"{s}\"", .{ mark, self.file, path.line, path.name });
+            if (path.witness) |witness| {
+                try writer.print(" line {d}", .{witness});
+            } else {
+                try writer.writeAll(" no line");
+            }
+            if (path.line_missing) {
+                try writer.writeAll(" (no code for it in this build)");
+            }
+            try writer.writeAll("\n");
         }
     }
 };
+
+// Which lines of one file the build has code for, and which of them a run executed, as read from
+// kcov by `covered_lines.zig`. Declared there; named here so a checklist can be ticked from one.
+pub const LineSet = @import("covered_lines.zig").LineSet;
 
 // The two ways `build` fails beyond running out of memory: `SourceDoesNotParse` says the text
 // handed in was not valid Zig at all, `FunctionNotFound` says it parsed but named no function
@@ -347,12 +429,15 @@ pub fn buildOccurrence(allocator: std.mem.Allocator, file: []const u8, source: [
     // with no `if`, `switch` or loop produced an empty checklist and reported "0 of 0", which is
     // wrong twice over: it has one path rather than none, and an empty checklist makes a function
     // nothing ever called indistinguishable from one that ran.
+    const opening_line = lineOf(tree, tree.firstToken(body));
     try paths.append(allocator, .{
-        .line = @intCast(tree.tokenLocation(0, tree.firstToken(body)).line + 1),
+        .line = opening_line,
         .name = try std.fmt.allocPrint(allocator, "{s}:entered", .{function_name}),
+        .witness = witnessFor(tree, body, opening_line),
     });
 
     try walkEveryBranch(allocator, tree, body, function_name, &paths);
+    dropSharedWitnesses(paths.items);
 
     const ticked = try allocator.alloc(bool, paths.items.len);
     @memset(ticked, false);
@@ -649,20 +734,122 @@ fn nameFor(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index, kind: 
 
 // One branch, named and with its own answer to whether anything can ever say it ran.
 //
-// A branch written as a block can be marked: a line goes inside it. One written as an expression
-// cannot, because there is nowhere in an expression to put a statement. A switch case that answers
-// with a value, a fallback after `orelse`, and an `if` used as a value are all of that kind, and
-// asking for a marker in one means asking for the expression to be rewritten as a block that does
-// nothing but hold it.
-fn pathFor(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index, kind: []const u8, line: u32, side: []const u8) std.mem.Allocator.Error!Path {
+// Two things can say so. A line of its own, which line coverage reports as run: the first statement
+// of a body written as a block, or an expression body that sits on a line below the condition. And a
+// marker written inside it, which only a block has room for. A switch case that answers with a value
+// on the same line as the `switch`, a fallback after `orelse` on the line of the `orelse`, and an
+// `if` used as a value on one line have neither, and asking for a marker in one means asking for the
+// expression to be rewritten as a block that does nothing but hold it.
+//
+// `controlling_line` is the line of the token that decides this branch (`if`, `switch`, `while`,
+// `for`, `catch`, `orelse`), which runs whether or not the branch is taken, so a body starting on it
+// has no line that proves it.
+fn pathFor(
+    allocator: std.mem.Allocator,
+    tree: Ast,
+    body: Ast.Node.Index,
+    kind: []const u8,
+    line: u32,
+    side: []const u8,
+    controlling_line: u32,
+) std.mem.Allocator.Error!Path {
+    const witness = witnessFor(tree, body, controlling_line);
     if (try singleAnnotateName(allocator, tree, body)) |found| {
-        return .{ .line = line, .name = found };
+        return .{ .line = line, .name = found, .witness = witness };
     }
+    const marker_room = canHoldAMarker(tree, body);
+    // A body that shares its condition's line has no line of its own only because of how it is
+    // written: an `if` side, a `switch` arm or a loop body stands where a statement can, so moved
+    // to a line of its own it is proved by that line. That is work a run can ask for, so the path
+    // stays observable and the checklist says to move it. A `catch` or `orelse` fallback is an
+    // expression with no such place to go, and is left as one no run can observe.
+    const can_be_given_a_line = witnessLineOf(tree, body) == controlling_line and
+        (std.mem.eql(u8, kind, "if") or std.mem.eql(u8, kind, "switch") or std.mem.eql(u8, kind, "loop"));
     return .{
         .line = line,
         .name = try syntheticName(allocator, kind, line, side),
-        .observable = canHoldAMarker(tree, body),
+        .observable = marker_room or witness != null or can_be_given_a_line,
+        .marker_room = marker_room,
+        .witness = witness,
     };
+}
+
+// The line whose execution proves `body` ran: its first statement's line for a block with
+// statements, otherwise the line its own first token sits on. Null when that is `controlling_line`,
+// since that line runs whether or not the branch is taken.
+fn witnessFor(tree: Ast, body: Ast.Node.Index, controlling_line: u32) ?u32 {
+    const line = witnessLineOf(tree, body);
+    if (line == controlling_line) {
+        return null;
+    }
+    return line;
+}
+
+// The line line coverage attributes the start of `body` to: the first statement of a block with
+// statements, or the first token of anything else.
+fn witnessLineOf(tree: Ast, body: Ast.Node.Index) u32 {
+    var buffer: [2]Ast.Node.Index = undefined;
+    if (tree.blockStatements(&buffer, body)) |statements| {
+        if (statements.len != 0) {
+            return lineOf(tree, tree.firstToken(statements[0]));
+        }
+    }
+    return lineOf(tree, tree.firstToken(body));
+}
+
+// The statement that follows `node` in the block holding it, or null when `node` is the last
+// statement of its block or stands in no block at all. The innermost block wins, so an `if` inside a
+// loop body is followed by the loop body's next statement rather than by whatever follows the loop.
+fn statementAfter(tree: Ast, node: Ast.Node.Index) ?Ast.Node.Index {
+    var innermost: ?Ast.Node.Index = null;
+    var innermost_span: u32 = std.math.maxInt(u32);
+    var index: u32 = 0;
+    while (index < tree.nodes.len) : (index += 1) {
+        const candidate: Ast.Node.Index = @enumFromInt(index);
+        var buffer: [2]Ast.Node.Index = undefined;
+        const statements = tree.blockStatements(&buffer, candidate) orelse continue;
+        var position: ?usize = null;
+        for (statements, 0..) |statement, at| {
+            if (statement == node) {
+                position = at;
+            }
+        }
+        const found = position orelse continue;
+        const span = tree.lastToken(candidate) - tree.firstToken(candidate);
+        if (span >= innermost_span) {
+            continue;
+        }
+        innermost_span = span;
+        // Taken now rather than kept as a slice: `statements` may point into `buffer`, which the
+        // next candidate overwrites.
+        innermost = if (found + 1 < statements.len) statements[found + 1] else null;
+    }
+    return innermost;
+}
+
+// A line two paths of one function both point at proves neither of them: a run that hit it took
+// one of the two, and the line does not say which. Both lose their witness, and each is observable
+// afterwards only through a marker or a count. Run once the whole function has been walked, because
+// the paths that share a line can sit in different branches.
+fn dropSharedWitnesses(paths: []Path) void {
+    for (paths, 0..) |path, index| {
+        const line = path.witness orelse continue;
+        var shared = false;
+        for (paths, 0..) |other, other_index| {
+            if (other_index != index and other.witness == line) {
+                shared = true;
+            }
+        }
+        if (!shared) {
+            continue;
+        }
+        for (paths) |*each| {
+            if (each.witness == line) {
+                each.witness = null;
+                each.observable = each.marker_room or each.not_taken != null;
+            }
+        }
+    }
 }
 
 // The not-taken side of an `if` that has no `else`.
@@ -683,10 +870,20 @@ fn pathWithNoElse(
     const name = try syntheticName(allocator, "if", line, "false");
     errdefer allocator.free(name);
 
-    // Without a marker on the taken side there is nothing to count against, so nothing can say this
-    // side ran.
+    // Where the taken side leaves, the statement after the `if` runs only when the condition did not
+    // hold, so its line proves this side. Where the taken side carries on, both sides reach that
+    // statement and no line says which one happened.
+    var witness: ?u32 = null;
+    if (takenSideLeaves(tree, if_full.ast.then_expr)) {
+        if (statementAfter(tree, node)) |next| {
+            witness = witnessFor(tree, next, line);
+        }
+    }
+
+    // Without a marker on the taken side there is nothing to count against, so only a line can say
+    // this side ran.
     const taken = (try singleAnnotateName(allocator, tree, if_full.ast.then_expr)) orelse {
-        return .{ .line = line, .name = name, .observable = false };
+        return .{ .line = line, .name = name, .observable = witness != null, .marker_room = false, .witness = witness };
     };
     errdefer allocator.free(taken);
 
@@ -698,7 +895,9 @@ fn pathWithNoElse(
     return .{
         .line = line,
         .name = name,
+        .marker_room = false,
         .not_taken = .{ .entered = reached, .taken = taken },
+        .witness = witness,
     };
 }
 
@@ -912,13 +1111,16 @@ fn walkEveryBranch(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index
         if (tree.fullIf(node)) |if_full| {
             const line = lineOf(tree, if_full.ast.if_token);
             if (!isUnreachableBody(tree, if_full.ast.then_expr)) {
-                try paths.append(allocator, try pathFor(allocator, tree, if_full.ast.then_expr, "if", line, "true"));
+                try paths.append(allocator, try pathFor(allocator, tree, if_full.ast.then_expr, "if", line, "true", line));
             }
 
             if (if_full.ast.else_expr.unwrap()) |else_expr| {
                 if (!isUnreachableBody(tree, else_expr)) {
+                    // The `if` line is the one that decides this side too: `} else if (c) {` puts
+                    // the next condition on the `else` line, and that line runs only when this
+                    // side was taken, so it is a witness rather than a line to rule out.
                     const at = lineOf(tree, tree.firstToken(else_expr));
-                    try paths.append(allocator, try pathFor(allocator, tree, else_expr, "if", at, "false"));
+                    try paths.append(allocator, try pathFor(allocator, tree, else_expr, "if", at, "false", line));
                 }
             } else {
                 try paths.append(allocator, try pathWithNoElse(allocator, tree, node, if_full, line, function_name));
@@ -927,6 +1129,10 @@ fn walkEveryBranch(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index
         }
 
         if (tree.fullSwitch(node)) |switch_full| {
+            // The `switch` keyword's line is where the choice is made, so an arm answering with a
+            // value on that same line has no line of its own; an arm on a line below does, even
+            // when it is a bare expression.
+            const switch_line = lineOf(tree, tree.nodeMainToken(node));
             for (switch_full.ast.cases) |case_node| {
                 const case_full = tree.fullSwitchCase(case_node) orelse continue;
                 if (isUnreachableBody(tree, case_full.ast.target_expr)) {
@@ -935,7 +1141,7 @@ fn walkEveryBranch(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index
                 const line = lineOf(tree, case_full.ast.arrow_token);
                 const label = try caseLabel(allocator, tree, case_full);
                 defer allocator.free(label);
-                try paths.append(allocator, try pathFor(allocator, tree, case_full.ast.target_expr, "switch", line, label));
+                try paths.append(allocator, try pathFor(allocator, tree, case_full.ast.target_expr, "switch", line, label, switch_line));
             }
             continue;
         }
@@ -966,7 +1172,7 @@ fn walkEveryBranch(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index
                         continue;
                     }
                     const else_line = lineOf(tree, tree.firstToken(else_expr));
-                    try paths.append(allocator, try pathFor(allocator, tree, else_expr, "loop", else_line, "completed"));
+                    try paths.append(allocator, try pathFor(allocator, tree, else_expr, "loop", else_line, "completed", line));
                 }
             }
             continue;
@@ -988,6 +1194,7 @@ fn walkEveryBranch(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index
                     .line = line,
                     .name = try syntheticName(allocator, kind, line, side),
                     .observable = false,
+                    .marker_room = false,
                 });
             }
             continue;
@@ -1001,6 +1208,7 @@ fn walkEveryBranch(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index
                 .line = line,
                 .name = try syntheticName(allocator, "try", line, "failed"),
                 .observable = false,
+                .marker_room = false,
             });
             continue;
         }
@@ -1019,7 +1227,7 @@ fn walkEveryBranch(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index
             if (isUnreachableBody(tree, fallback)) {
                 continue;
             }
-            try paths.append(allocator, try pathFor(allocator, tree, fallback, kind, line, "taken"));
+            try paths.append(allocator, try pathFor(allocator, tree, fallback, kind, line, "taken", line));
             continue;
         }
     }
@@ -1078,16 +1286,20 @@ fn appendLoopPaths(allocator: std.mem.Allocator, tree: Ast, site: LoopSite, path
     const iteration = try firstStatementAnnotateName(allocator, tree, site.body);
     defer if (iteration) |name| allocator.free(name);
 
+    const witness = witnessFor(tree, site.body, site.line);
     if (iteration == null) {
+        const marker_room = canHoldAMarker(tree, site.body);
         try paths.append(allocator, .{
             .line = site.line,
             .name = try syntheticName(allocator, "loop", site.line, "body"),
-            .observable = canHoldAMarker(tree, site.body),
+            .observable = marker_room or witness != null,
+            .marker_room = marker_room,
+            .witness = witness,
         });
         return;
     }
 
-    try paths.append(allocator, .{ .line = site.line, .name = try allocator.dupe(u8, iteration.?) });
+    try paths.append(allocator, .{ .line = site.line, .name = try allocator.dupe(u8, iteration.?), .witness = witness });
 }
 
 // The name on the `if (an) annotate(...)` written as the first statement of `body`, which is how a

@@ -47,5 +47,35 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
 
+      # Built from source rather than fetched, because the prebuilt release is linked against one
+      # Ubuntu release's binutils by soname and loads on no other, and the runner's own package
+      # lists carry no kcov. The built binary
+      # is cached by version and runner image, so the build runs once per version rather than once
+      # per job; the libraries it links against come from apt on every run, since the cache holds
+      # only what was installed under the prefix.
+      - name: Restore a kcov built by an earlier run
+        id: kcov-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/kcov
+          key: kcov-43-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install the libraries kcov links against
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdw1 libelf1 libcurl4 zlib1g libssl3
+
+      - name: Build kcov
+        if: steps.kcov-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y cmake g++ libdw-dev libelf-dev libcurl4-openssl-dev zlib1g-dev libssl-dev
+          curl -L https://github.com/SimonKagstrom/kcov/archive/refs/tags/v43.tar.gz | tar xz -C "$RUNNER_TEMP"
+          cmake -S "$RUNNER_TEMP/kcov-43" -B "$RUNNER_TEMP/kcov-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/.local/kcov"
+          cmake --build "$RUNNER_TEMP/kcov-build" --parallel
+          cmake --install "$RUNNER_TEMP/kcov-build"
+
+      - name: Put kcov on the PATH
+        run: echo "$HOME/.local/kcov/bin" >> "$GITHUB_PATH"
+
       - name: Run the examples
         run: bash scripts/smoke.sh --shard ${{ matrix.shard }}/6

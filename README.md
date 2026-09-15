@@ -14,7 +14,8 @@ It is a library your project depends on. Two lines put it in, one to fetch it an
 
 ## The work you have to do to make this possible
 
-- Annotate every branch of your code. This will be done by automatic code coverage in the future.
+- Install [kcov](https://github.com/SimonKagstrom/kcov), which Faultline runs your code under to see which lines ran.
+- Annotate the few branches kcov cannot tell apart: a body on the same line as its condition, and the false side of an `if` with no `else` whose true side carries on. Faultline names each one on its checklist. Every other branch is covered by its own line running.
 - Provide factory functions for your custom types to Faultline so it can automatically build inputs to your functions (all standard types are covered automatically, this is only need for your custom types).
 - Provide scenario functions that exercise code paths that Faultline can't reach by itself.
 

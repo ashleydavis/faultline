@@ -641,3 +641,272 @@ test "a branch inside a catch body is a path" {
     try std.testing.expect(found_if);
 }
 
+// The witness line of the path named `name`, or an error naming the path that is not there.
+fn witnessOf(checklist: coverage.Checklist, name: []const u8) !?u32 {
+    for (checklist.paths) |path| {
+        if (std.mem.eql(u8, path.name, name)) {
+            return path.witness;
+        }
+    }
+    std.debug.print("no path named \"{s}\"\n", .{name});
+    return error.NoSuchPath;
+}
+
+// One function holding every form a witness line is worked out for, each on lines the test names.
+const witness_source =
+    \\fn sample(flag: bool, count: usize, choice: u8, items: []const u8) !u8 {
+    \\    if (flag) {
+    \\        one();
+    \\    } else {
+    \\        two();
+    \\    }
+    \\    if (count == 0) return 1;
+    \\    after();
+    \\    if (count == 1) {
+    \\        carryOn();
+    \\    }
+    \\    switch (choice) {
+    \\        1 => {
+    \\            caseOne();
+    \\        },
+    \\        2 => caseTwo(),
+    \\        else => caseElse(),
+    \\    }
+    \\    for (items) |item| {
+    \\        work(item);
+    \\    } else {
+    \\        finished();
+    \\    }
+    \\    const value = call() catch |err| {
+    \\        return fallback(err);
+    \\    };
+    \\    const other = maybe() orelse 0;
+    \\    const both = flag and value > 0;
+    \\    const read = try reading();
+    \\    return value + other + read + @intFromBool(both);
+    \\}
+;
+
+// Every path a line can prove points at the first line of its own body, and the false side of an
+// `if` whose taken side returns points at the statement after it.
+test "every path carries the line that proves it" {
+    const allocator = std.testing.allocator;
+    var checklist = try coverage.build(allocator, "fixture.zig", witness_source, "sample");
+    defer checklist.deinit();
+
+    try std.testing.expectEqual(@as(?u32, 2), try witnessOf(checklist, "sample:entered"));
+    try std.testing.expectEqual(@as(?u32, 3), try witnessOf(checklist, "if:2:true"));
+    try std.testing.expectEqual(@as(?u32, 5), try witnessOf(checklist, "if:4:false"));
+    // The taken side leaves, so `after()` on the next line runs only when the condition did not hold.
+    try std.testing.expectEqual(@as(?u32, 8), try witnessOf(checklist, "if:7:false"));
+    try std.testing.expectEqual(@as(?u32, 14), try witnessOf(checklist, "switch:13:1"));
+    // A bare expression on a line below the `switch` has a line of its own.
+    try std.testing.expectEqual(@as(?u32, 16), try witnessOf(checklist, "switch:16:2"));
+    try std.testing.expectEqual(@as(?u32, 17), try witnessOf(checklist, "switch:17:else"));
+    try std.testing.expectEqual(@as(?u32, 20), try witnessOf(checklist, "loop:19:body"));
+    try std.testing.expectEqual(@as(?u32, 22), try witnessOf(checklist, "loop:21:completed"));
+    try std.testing.expectEqual(@as(?u32, 25), try witnessOf(checklist, "catch:24:taken"));
+}
+
+// The paths no line can prove: a body on the line of its own condition, the false side of an `if`
+// whose taken side carries on, a fallback on the line of its `orelse`, and the forms with no line at
+// all.
+test "a body on its condition's line, a side that carries on, and a short-circuit have no witness" {
+    const allocator = std.testing.allocator;
+    var checklist = try coverage.build(allocator, "fixture.zig", witness_source, "sample");
+    defer checklist.deinit();
+
+    try std.testing.expectEqual(@as(?u32, null), try witnessOf(checklist, "if:7:true"));
+    try std.testing.expectEqual(@as(?u32, null), try witnessOf(checklist, "if:9:false"));
+    try std.testing.expectEqual(@as(?u32, null), try witnessOf(checklist, "orelse:27:taken"));
+    try std.testing.expectEqual(@as(?u32, null), try witnessOf(checklist, "and:28:short-circuit"));
+    try std.testing.expectEqual(@as(?u32, null), try witnessOf(checklist, "and:28:evaluated"));
+    try std.testing.expectEqual(@as(?u32, null), try witnessOf(checklist, "try:29:failed"));
+}
+
+// A witness makes a path observable that no marker could: the false side of a no-else `if` whose
+// taken side returns, and a bare-expression switch arm on its own line. A body on its condition's
+// line is observable too, because moving it to a line of its own is what the checklist asks for; a
+// fallback on the line of its `orelse` and a side that carries on are observable through neither a
+// line nor a marker.
+test "a witness line is what makes a markerless path observable" {
+    const allocator = std.testing.allocator;
+    var checklist = try coverage.build(allocator, "fixture.zig", witness_source, "sample");
+    defer checklist.deinit();
+
+    for (checklist.paths) |path| {
+        if (std.mem.eql(u8, path.name, "if:7:false") or std.mem.eql(u8, path.name, "switch:16:2")) {
+            try std.testing.expect(path.observable);
+            try std.testing.expect(!path.marker_room);
+        }
+        if (std.mem.eql(u8, path.name, "if:7:true")) {
+            try std.testing.expect(path.observable);
+            try std.testing.expect(!path.marker_room);
+            try std.testing.expect(path.witness == null);
+        }
+        if (std.mem.eql(u8, path.name, "if:9:false") or std.mem.eql(u8, path.name, "orelse:27:taken")) {
+            try std.testing.expect(!path.observable);
+        }
+        if (std.mem.eql(u8, path.name, "if:2:true")) {
+            try std.testing.expect(path.observable);
+            try std.testing.expect(path.marker_room);
+        }
+    }
+}
+
+// Two arms on one line share it, so it proves neither; the arm on a line of its own keeps it.
+test "a line two paths share proves neither of them" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\fn sample(choice: u8) u8 {
+        \\    return switch (choice) {
+        \\        1 => one(), 2 => two(),
+        \\        else => three(),
+        \\    };
+        \\}
+    ;
+    var checklist = try coverage.build(allocator, "fixture.zig", source, "sample");
+    defer checklist.deinit();
+
+    try std.testing.expectEqual(@as(?u32, null), try witnessOf(checklist, "switch:3:1"));
+    try std.testing.expectEqual(@as(?u32, null), try witnessOf(checklist, "switch:3:2"));
+    try std.testing.expectEqual(@as(?u32, 4), try witnessOf(checklist, "switch:4:else"));
+    for (checklist.paths) |path| {
+        if (std.mem.eql(u8, path.name, "switch:3:1")) {
+            // Nowhere to put a marker and no line of its own, so no run can observe it.
+            try std.testing.expect(!path.observable);
+        }
+    }
+}
+
+// A no-else `if` that is the last statement of its block has no statement after it to point at.
+test "the false side of a last-statement if that returns has no witness" {
+    const allocator = std.testing.allocator;
+    const source =
+        \\fn sample(flag: bool) void {
+        \\    work();
+        \\    if (flag) {
+        \\        return;
+        \\    }
+        \\}
+    ;
+    var checklist = try coverage.build(allocator, "fixture.zig", source, "sample");
+    defer checklist.deinit();
+
+    try std.testing.expectEqual(@as(?u32, null), try witnessOf(checklist, "if:3:false"));
+    try std.testing.expectEqual(@as(?u32, 4), try witnessOf(checklist, "if:3:true"));
+}
+
+// A set of lines the way kcov would report them for the fixture: every listed line is code, and
+// the ones in `hit` ran.
+fn linesWith(allocator: std.mem.Allocator, code: []const u32, hit: []const u32) !coverage.LineSet {
+    var set: coverage.LineSet = .{};
+    errdefer set.deinit(allocator);
+    for (code) |line| {
+        try set.code.put(allocator, line, {});
+    }
+    for (hit) |line| {
+        try set.hit.put(allocator, line, {});
+    }
+    return set;
+}
+
+test "tickFromLines ticks a path whose witness ran and leaves one whose witness did not" {
+    const allocator = std.testing.allocator;
+    var checklist = try coverage.build(allocator, "fixture.zig", witness_source, "sample");
+    defer checklist.deinit();
+
+    var lines = try linesWith(allocator, &.{ 2, 3, 5, 8, 14, 16 }, &.{ 2, 3, 8 });
+    defer lines.deinit(allocator);
+    checklist.tickFromLines(&lines);
+
+    try std.testing.expect(isTicked(checklist, "sample:entered"));
+    try std.testing.expect(isTicked(checklist, "if:2:true"));
+    try std.testing.expect(isTicked(checklist, "if:7:false"));
+    try std.testing.expect(!isTicked(checklist, "if:4:false"));
+    try std.testing.expect(!isTicked(checklist, "switch:13:1"));
+    // No witness, so no line can tick it, whatever ran.
+    try std.testing.expect(!isTicked(checklist, "if:7:true"));
+}
+
+fn isTicked(checklist: coverage.Checklist, name: []const u8) bool {
+    for (checklist.paths, 0..) |path, index| {
+        if (std.mem.eql(u8, path.name, name)) {
+            return checklist.ticked[index];
+        }
+    }
+    return false;
+}
+
+test "markMissingLines flags an unticked witness the build has no code for, and only that" {
+    const allocator = std.testing.allocator;
+    var checklist = try coverage.build(allocator, "fixture.zig", witness_source, "sample");
+    defer checklist.deinit();
+
+    // Line 14 is code that did not run; line 5 is not code at all.
+    var lines = try linesWith(allocator, &.{ 2, 3, 14 }, &.{ 2, 3 });
+    defer lines.deinit(allocator);
+    checklist.tickFromLines(&lines);
+    checklist.markMissingLines(&lines);
+
+    for (checklist.paths) |path| {
+        if (std.mem.eql(u8, path.name, "if:4:false")) {
+            try std.testing.expect(path.line_missing);
+        }
+        if (std.mem.eql(u8, path.name, "switch:13:1")) {
+            try std.testing.expect(!path.line_missing);
+        }
+        // Ticked, so never flagged, whatever the code set says.
+        if (std.mem.eql(u8, path.name, "if:2:true")) {
+            try std.testing.expect(!path.line_missing);
+        }
+        // No witness to be missing.
+        if (std.mem.eql(u8, path.name, "if:7:true")) {
+            try std.testing.expect(!path.line_missing);
+        }
+    }
+}
+
+// Once lines have been read, an entry no annotation said and no line hit is a path the run failed
+// to reach, and one a line did hit survives an empty trace. Before lines are read, an entry no
+// annotation said is unobservable, exactly as it was.
+test "an entry proven by a line survives an empty trace, and one no line hit stays observable" {
+    const allocator = std.testing.allocator;
+
+    var proven = try coverage.build(allocator, "fixture.zig", witness_source, "sample");
+    defer proven.deinit();
+    var hit = try linesWith(allocator, &.{2}, &.{2});
+    defer hit.deinit(allocator);
+    proven.tickFromLines(&hit);
+    proven.tickFromTrace(&.{});
+    try std.testing.expect(isTicked(proven, "sample:entered"));
+    try std.testing.expect(proven.paths[0].observable);
+
+    var unreached = try coverage.build(allocator, "fixture.zig", witness_source, "sample");
+    defer unreached.deinit();
+    var missed = try linesWith(allocator, &.{2}, &.{});
+    defer missed.deinit(allocator);
+    unreached.tickFromLines(&missed);
+    unreached.tickFromTrace(&.{});
+    try std.testing.expect(!isTicked(unreached, "sample:entered"));
+    try std.testing.expect(unreached.paths[0].observable);
+
+    var unread = try coverage.build(allocator, "fixture.zig", witness_source, "sample");
+    defer unread.deinit();
+    unread.tickFromTrace(&.{});
+    try std.testing.expect(!unread.paths[0].observable);
+}
+
+test "report names the witness line, or says there is none" {
+    const allocator = std.testing.allocator;
+    var checklist = try coverage.build(allocator, "fixture.zig", witness_source, "sample");
+    defer checklist.deinit();
+
+    var written: std.Io.Writer.Allocating = .init(allocator);
+    defer written.deinit();
+    try checklist.report(&written.writer);
+
+    try std.testing.expect(std.mem.indexOf(u8, written.written(), "\"if:2:true\" line 3\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written.written(), "\"if:7:true\" no line\n") != null);
+}
+
