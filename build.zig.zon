@@ -1,0 +1,19 @@
+.{
+    .name = .faultline,
+    // Zig refuses to build without this field. Faultline is not versioned: it is fetched by commit,
+    // and this number means nothing.
+    .version = "0.0.0",
+    .fingerprint = 0xe85551edc4010cd5,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    // What a repository fetching this package gets. `src/cmd` is in it because build.zig imports
+    // `src/cmd/discover.zig`, so a package without it hands the consumer a build file that cannot
+    // compile.
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src/log",
+        "src/framework",
+        "src/cmd",
+    },
+}

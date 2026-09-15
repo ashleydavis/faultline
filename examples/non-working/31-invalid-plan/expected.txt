@@ -1,0 +1,7 @@
+Fault testing the Zig source in 31-invalid-plan.
+The run stopped with InvalidPlan.
+flt
++- run exe flt-sim failure
+error: process exited with error code 1
+failed command: cd .zig-cache/flt-sandbox && ./<cache>/flt-sim --repository examples/non-working/31-invalid-plan --report <cache>/sim-coverage-report.txt --replay "not a plan at all"
+

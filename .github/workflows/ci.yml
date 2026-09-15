@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+jobs:
+  run-tests:
+    name: Run tests
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # With no version it installs the one build.zig.zon names in minimum_zig_version.
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+
+      - name: Compile
+        run: zig build
+
+      - name: Run the unit tests
+        run: zig build test
+
+  # Each example is a Zig compilation of its own and a runner has four cores, so one runner takes a
+  # quarter of an hour over them. A runner per shard is what keeps the suite to minutes.
+  examples:
+    name: Examples ${{ matrix.shard }} of 6
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+
+      - name: Run the examples
+        run: bash scripts/smoke.sh --shard ${{ matrix.shard }}/6

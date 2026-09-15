@@ -1,0 +1,8 @@
+Fault testing the Zig source in 34-replay-fails.
+The replay of "seed=1" failed in . with DrewOutOfBound.
+The run stopped with DrewOutOfBound.
+flt
++- run exe flt-sim failure
+error: process exited with error code 1
+failed command: cd .zig-cache/flt-sandbox && ./<cache>/flt-sim --repository examples/non-working/34-replay-fails --report <cache>/sim-coverage-report.txt --replay seed=1
+

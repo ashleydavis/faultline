@@ -1,0 +1,2 @@
+examples/non-working/30-unaccounted-declaration/build.zig.zon:2:14: error: name 'example_30_unaccounted_declaration' exceeds max length of 32
+    .name = .example_30_unaccounted_declaration,

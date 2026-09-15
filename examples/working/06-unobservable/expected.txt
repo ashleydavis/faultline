@@ -1,0 +1,26 @@
+Fault testing the Zig source in 06-unobservable.
+
+Deterministic simulation of 1 package. The report comes at the end.
+  Read 2 source files, with 4 functions to drive.
+  .: scenarios first, then every function from its own types.
+  Reading what those calls reached.
+  .: sweeping 32 seeds.
+
+Deterministic simulation
+
+
+  4 functions covered every path, and are not listed above.
+
+  Found 1 source file, tested 1, drove 4 functions and executed 6 of 6 paths.
+  Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
+  Swept 32 seeds, with no crash and every recovery invariant holding.
+  Full detail is in <cache>/sim-coverage-report.txt.
+
+  5 branches are not counted above, because nothing can observe them: a `try`,
+  `and` or `or` has nowhere to put an annotation.
+
+
+  Coverage: 6 of 6 paths, 100%.
+
+  Passed: every code path ran.
+  Took 0s.

@@ -1,0 +1,19 @@
+Fault testing the Zig source in 36-crash-under-injection.
+
+Deterministic simulation of 1 package. The report comes at the end.
+  Read 2 source files, with 1 function to drive.
+  .: scenarios first, then every function from its own types.
+thread panic: index out of bounds: index 0, len 0
+examples/non-working/36-crash-under-injection/<cache>/buffer.zig:10:18: in firstOf (flt-sim)
+    return values[0];
+            options.subject.run(options.subject.ctx, &injecting) catch |err| {
+        run.faults_injected += try package.simulation.explore(allocator);
+<zig>/lib/std/start.zig:699:88: in callMain (flt-sim)
+    if (fn_info.params[0].type.? == std.process.Init.Minimal) return wrapMain(root.main(.{
+<zig>/lib/std/start.zig:190:5: in _start (flt-sim)
+    asm volatile (switch (native_arch) {
+flt
++- run exe flt-sim failure
+error: process terminated with signal ABRT
+failed command: cd .zig-cache/flt-sandbox && ./<cache>/flt-sim --repository examples/non-working/36-crash-under-injection --report <cache>/sim-coverage-report.txt
+
