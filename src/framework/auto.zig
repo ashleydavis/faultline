@@ -137,9 +137,13 @@ fn canMakeValueTo(comptime T: type, comptime Log: type, comptime ValueFactoryLoc
             else => false,
         },
         .@"struct" => |info| blk: {
-            if (info.layout == .@"extern" or info.layout == .@"packed") break :blk false;
+            if (info.layout == .@"extern" or info.layout == .@"packed") {
+                break :blk false;
+            }
             for (info.fields) |field| {
-                if (!canMakeValueTo(field.type, Log, ValueFactoryLocator, depth - 1)) break :blk false;
+                if (!canMakeValueTo(field.type, Log, ValueFactoryLocator, depth - 1)) {
+                    break :blk false;
+                }
             }
             break :blk true;
         },
@@ -147,9 +151,13 @@ fn canMakeValueTo(comptime T: type, comptime Log: type, comptime ValueFactoryLoc
         // cannot be built are simply never chosen. An untagged union has no way to say which
         // variant a value is, so nothing can build one safely.
         .@"union" => |info| blk: {
-            if (info.tag_type == null) break :blk false;
+            if (info.tag_type == null) {
+                break :blk false;
+            }
             for (info.fields) |field| {
-                if (canMakeValueTo(field.type, Log, ValueFactoryLocator, depth - 1)) break :blk true;
+                if (canMakeValueTo(field.type, Log, ValueFactoryLocator, depth - 1)) {
+                    break :blk true;
+                }
             }
             break :blk false;
         },
@@ -377,7 +385,9 @@ pub fn valueFactory(comptime T: type, comptime Log: type, comptime ValueFactoryL
             const count = comptime made: {
                 var total: usize = 0;
                 for (info.fields) |field| {
-                    if (canMakeValue(field.type, Log, ValueFactoryLocator)) total += 1;
+                    if (canMakeValue(field.type, Log, ValueFactoryLocator)) {
+                        total += 1;
+                    }
                 }
                 break :made total;
             };

@@ -34,7 +34,6 @@ Deterministic simulation
 
   Failed: 2 code paths of 6 were never reached.
   The list above says what to do about each one.
-  Took 0s.
 flt
 +- run exe flt-sim failure
 error: process exited with error code 1

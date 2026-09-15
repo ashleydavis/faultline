@@ -60,7 +60,9 @@ pub const Plan = struct {
 
     pub fn isSkipped(self: Plan, index: usize) bool {
         for (self.skipped) |entry| {
-            if (entry == index) return true;
+            if (entry == index) {
+                return true;
+            }
         }
         return false;
     }
@@ -69,7 +71,9 @@ pub const Plan = struct {
     // the stall limit again for the next value that also hangs.
     pub fn stalledWithin(self: Plan, from: usize, until: usize) bool {
         for (self.stalled) |entry| {
-            if (entry >= from and entry < until) return true;
+            if (entry >= from and entry < until) {
+                return true;
+            }
         }
         return false;
     }
@@ -80,7 +84,9 @@ pub const Plan = struct {
     pub fn skippedCountWithin(self: Plan, from: usize, until: usize) usize {
         var total: usize = 0;
         for (self.skipped) |entry| {
-            if (entry >= from and entry < until) total += 1;
+            if (entry >= from and entry < until) {
+                total += 1;
+            }
         }
         return total;
     }
@@ -456,7 +462,9 @@ fn takeLine(
     collected: *std.ArrayList([]const u8),
     allocator: std.mem.Allocator,
 ) !void {
-    if (line.len == 0) return;
+    if (line.len == 0) {
+        return;
+    }
     switch (line[0]) {
         line_at => {
             found.last_index = std.fmt.parseInt(usize, line[1..], 10) catch found.last_index;
@@ -578,7 +586,9 @@ pub fn freeTimings(allocator: std.mem.Allocator) void {
     for (timings.items) |held| allocator.free(held.key);
     timings.deinit(allocator);
     timings = .empty;
-    if (timing_key) |held| allocator.free(held);
+    if (timing_key) |held| {
+        allocator.free(held);
+    }
     timing_key = null;
     timing_calls = 0;
     progress_started_ns = 0;

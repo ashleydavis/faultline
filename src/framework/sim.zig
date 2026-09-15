@@ -407,7 +407,9 @@ pub inline fn nameOf(comptime Namespace: type, comptime function: anytype) []con
         var found: ?[]const u8 = null;
         for (@typeInfo(Namespace).@"struct".decls) |decl| {
             const declared = @field(Namespace, decl.name);
-            if (@TypeOf(declared) != @TypeOf(function)) continue;
+            if (@TypeOf(declared) != @TypeOf(function)) {
+                continue;
+            }
             if (&declared == &function) {
                 found = decl.name;
             }
@@ -431,7 +433,9 @@ pub fn tallyOf(tallies: []FunctionTally, comptime Namespace: type, comptime func
 pub fn tallyIfRegistered(tallies: []FunctionTally, function_name: []const u8) ?*FunctionTally {
     var found: ?*FunctionTally = null;
     for (tallies) |*tally| {
-        if (!std.mem.eql(u8, tally.function, function_name)) continue;
+        if (!std.mem.eql(u8, tally.function, function_name)) {
+            continue;
+        }
         if (found != null) {
             std.debug.panic("\"{s}\" is declared more than once in this package, so a tally cannot be found by name alone.", .{function_name});
         }
@@ -537,12 +541,18 @@ pub const UntickedPath = struct {
 // without anything else being edited.
 pub fn isSynthesizedName(name: []const u8) bool {
     for (coverage_mod.synthesized_kinds) |kind| {
-        if (!std.mem.startsWith(u8, name, kind)) continue;
+        if (!std.mem.startsWith(u8, name, kind)) {
+            continue;
+        }
         const rest = name[kind.len..];
         const digits_end = std.mem.indexOfScalar(u8, rest, ':') orelse continue;
-        if (digits_end == 0) continue;
+        if (digits_end == 0) {
+            continue;
+        }
         for (rest[0..digits_end]) |character| {
-            if (!std.ascii.isDigit(character)) return false;
+            if (!std.ascii.isDigit(character)) {
+                return false;
+            }
         }
         return true;
     }
@@ -774,7 +784,9 @@ pub fn readCoverage(
         };
 
         for (checklist.paths, 0..) |path, path_index| {
-            if (checklist.ticked[path_index]) continue;
+            if (checklist.ticked[path_index]) {
+                continue;
+            }
             // A short-circuit or a `try` has no statement position for an annotation, so no run can
             // tick it. Counted and listed rather than failing a run that could never pass.
             if (!path.observable) {
@@ -1554,9 +1566,15 @@ fn ValueFactoryLocator(comptime Recorder: type, comptime Namespace: type, compti
                     for (@typeInfo(Holder).@"struct".decls) |decl| {
                         const Function = @TypeOf(@field(Holder, decl.name));
                         const info = @typeInfo(Function);
-                        if (info != .@"fn" or info.@"fn".is_generic) continue;
-                        if (info.@"fn".return_type != T) continue;
-                        if (info.@"fn".params.len == 0) continue;
+                        if (info != .@"fn" or info.@"fn".is_generic) {
+                            continue;
+                        }
+                        if (info.@"fn".return_type != T) {
+                            continue;
+                        }
+                        if (info.@"fn".params.len == 0) {
+                            continue;
+                        }
                         const Param = info.@"fn".params[0].type orelse continue;
                         const pointer = @typeInfo(Param);
                         // `isFactory`, which is what goes on to call this, matches `*State` and not
@@ -1566,7 +1584,9 @@ fn ValueFactoryLocator(comptime Recorder: type, comptime Namespace: type, compti
                             continue;
                         }
                         const State = pointer.pointer.child;
-                        if (!auto_mod.canMakeValue(State, logTypeOf(Recorder), Below)) continue;
+                        if (!auto_mod.canMakeValue(State, logTypeOf(Recorder), Below)) {
+                            continue;
+                        }
                         // The same allowance `isFactory` makes: a factory may ask for a log or an
                         // allocator beside the state it is wired to.
                         var extras_ok = true;
@@ -1580,10 +1600,14 @@ fn ValueFactoryLocator(comptime Recorder: type, comptime Namespace: type, compti
                                 break;
                             }
                         }
-                        if (!extras_ok) continue;
+                        if (!extras_ok) {
+                            continue;
+                        }
                         var already = false;
                         for (found) |seen| {
-                            if (seen == State) already = true;
+                            if (seen == State) {
+                                already = true;
+                            }
                         }
                         if (!already) {
                             found = found ++ [_]type{State};
@@ -1695,9 +1719,13 @@ fn helperTypes(comptime Namespace: type) []const type {
         var found: []const type = &.{};
         for (helperNamespaces(Namespace)) |Helper| {
             for (@typeInfo(Helper).@"struct".decls) |decl| {
-                if (@TypeOf(@field(Helper, decl.name)) != type) continue;
+                if (@TypeOf(@field(Helper, decl.name)) != type) {
+                    continue;
+                }
                 const candidate = @field(Helper, decl.name);
-                if (@typeInfo(candidate) != .@"struct") continue;
+                if (@typeInfo(candidate) != .@"struct") {
+                    continue;
+                }
                 found = found ++ [_]type{candidate};
             }
         }
@@ -1773,7 +1801,7 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
         ) void {
             if (@hasDecl(Inner, "modules")) {
                 inline for (Inner.modules) |entry| {
-                    exerciseModule(entry.code, comptime indexOfModule(entry.module), entry.literals, entry.reflecting, plan, out, counter);
+                    exerciseModule(entry.code, comptime indexOfModule(entry.module), entry.literals, entry.reflecting, entry.uncallable, plan, out, counter);
                 }
             }
             if (@hasDecl(Inner, "simulations")) {
@@ -1788,6 +1816,7 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
             comptime module: usize,
             literals: []const []const u8,
             comptime reflecting: []const []const u8,
+            comptime uncallable: []const []const u8,
             plan: isolate_mod.Plan,
             out: isolate_mod.Emitter,
             counter: *usize,
@@ -1828,7 +1857,7 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
 
             inline for (@typeInfo(Module).@"struct".decls) |decl| {
                 const value = @field(Module, decl.name);
-                if (comptime (!isNamed(reflecting, decl.name) and
+                if (comptime (!isNamed(reflecting, decl.name) and !isNamed(uncallable, decl.name) and
                     (auto_mod.canExercise(@TypeOf(value), Log, Locating) or
                         auto_mod.canExerciseGeneric(@TypeOf(value)) or
                         auto_mod.canExerciseInvoker(@TypeOf(value)))))
@@ -1857,7 +1886,7 @@ fn AutomaticRun(comptime Namespace: type, comptime Recorder: type) type {
                 if (comptime @TypeOf(value) == type and @typeInfo(value) == .@"struct") {
                     inline for (@typeInfo(value).@"struct".decls) |inner| {
                         const method = @field(value, inner.name);
-                        if (comptime (!isNamed(reflecting, inner.name) and
+                        if (comptime (!isNamed(reflecting, inner.name) and !isNamed(uncallable, inner.name) and
                             (auto_mod.canExercise(@TypeOf(method), Log, Locating) or
                                 auto_mod.canExerciseGeneric(@TypeOf(method)) or
                                 auto_mod.canExerciseInvoker(@TypeOf(method)))))
@@ -2553,8 +2582,12 @@ pub fn checkCoverage(run: *Run, annotated: []const Annotated) !void {
         // number and the checklist that a reader is meant to start from.
         output_mod.print("\n  Every branch, ticked and unticked, is in {s}.\n", .{run.report_path});
     }
-    if (coverage_error) |err| return err;
-    if (enumeration_error) |err| return err;
+    if (coverage_error) |err| {
+        return err;
+    }
+    if (enumeration_error) |err| {
+        return err;
+    }
 }
 
 // The summary, then the exit status: every function and what it covered, what the run swept, where

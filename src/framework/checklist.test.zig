@@ -140,7 +140,9 @@ test "past the limit the rest are counted and the report file is named" {
     var lines: usize = 0;
     var walk = std.mem.splitScalar(u8, text, '\n');
     while (walk.next()) |line| {
-        if (std.mem.startsWith(u8, line, "    Add an annotation")) lines += 1;
+        if (std.mem.startsWith(u8, line, "    Add an annotation")) {
+            lines += 1;
+        }
     }
     try std.testing.expectEqual(checklist.terminal_limit, lines);
 }

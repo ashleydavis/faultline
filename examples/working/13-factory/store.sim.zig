@@ -22,9 +22,13 @@ pub const OneEntry = struct {
 };
 
 fn std_mem_eql(a: []const u8, b: []const u8) bool {
-    if (a.len != b.len) return false;
+    if (a.len != b.len) {
+        return false;
+    }
     for (a, b) |left, right| {
-        if (left != right) return false;
+        if (left != right) {
+            return false;
+        }
     }
     return true;
 }

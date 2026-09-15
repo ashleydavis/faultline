@@ -1,0 +1,36 @@
+Fault testing the Zig source in 48-never-returns.
+
+Deterministic simulation of 1 package. The report comes at the end.
+  Read 1 source file, with 1 function to exercise.
+  Reading what those calls reached.
+  .: sweeping 32 seeds.
+
+Deterministic simulation
+
+  counting.zig
+    MISS oneLess                            2/4 paths
+
+  Found 1 source file, tested 1, exercised 1 function and executed 2 of 4 paths.
+  Every call ran against a network that refuses every connection, one call in 4 against an allocator that runs out, and one in 4 against a writer with almost no room.
+  Stepped over 1 call, 1 of them after 5s of processor time without returning and the rest for crashing on an input the function was never written for. The paths they would have covered are not in the count above.
+  Swept 32 seeds, with no crash and every recovery invariant holding.
+  Full detail is in <cache>/sim-coverage-report.txt.
+
+
+  FAIL 2 code paths that nothing reached:
+      counting.zig:14 "oneLess-still-going" in oneLess: annotated, but counting.sim.zig never exercised it.
+      counting.zig:11 "oneLess-round-forever" in oneLess: annotated, but counting.sim.zig never exercised it.
+
+  Two things to do:
+    Write a scenario reaching "oneLess-still-going" at counting.zig:14 in oneLess. Nothing the run made up got there.
+    Write a scenario reaching "oneLess-round-forever" at counting.zig:11 in oneLess. Nothing the run made up got there.
+
+  Coverage: 2 of 4 paths, 50%.
+
+  Failed: 2 code paths of 4 were never reached.
+  The list above says what to do about each one.
+flt
++- run exe flt-sim failure
+error: process exited with error code 1
+failed command: cd .zig-cache/flt-sandbox && ./<cache>/flt-sim --repository examples/non-working/48-never-returns --report <cache>/sim-coverage-report.txt
+

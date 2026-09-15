@@ -93,7 +93,9 @@ pub fn whereItGoes(allocator: std.mem.Allocator, name: []const u8) !?[]const u8 
     const rest = name[first + 1 ..];
     const second = std.mem.indexOfScalar(u8, rest, ':') orelse return null;
     for (rest[0..second]) |character| {
-        if (!std.ascii.isDigit(character)) return null;
+        if (!std.ascii.isDigit(character)) {
+            return null;
+        }
     }
     const side = rest[second + 1 ..];
 

@@ -594,7 +594,9 @@ test "a short-circuit, a try, and the side of an `if` that carries on are what n
 
     var unobservable: usize = 0;
     for (checklist.paths) |path| {
-        if (path.observable) continue;
+        if (path.observable) {
+            continue;
+        }
         unobservable += 1;
         const is_short_circuit = std.mem.startsWith(u8, path.name, "and:") or std.mem.startsWith(u8, path.name, "or:");
         const is_try = std.mem.startsWith(u8, path.name, "try:");
@@ -632,7 +634,9 @@ test "a branch inside a catch body is a path" {
 
     var found_if = false;
     for (checklist.paths) |path| {
-        if (std.mem.eql(u8, path.name, "if:3:true")) found_if = true;
+        if (std.mem.eql(u8, path.name, "if:3:true")) {
+            found_if = true;
+        }
     }
     try std.testing.expect(found_if);
 }

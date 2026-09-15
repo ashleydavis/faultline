@@ -215,7 +215,11 @@ test "building a value fills every field and reaches both sides of an optional" 
         _ = pair.right.len;
 
         const maybe = try auto.valueFactory(?u32, FakeLog, NoFactories, ctx);
-        if (maybe == null) saw_null = true else saw_value = true;
+        if (maybe == null) {
+            saw_null = true;
+        } else {
+            saw_value = true;
+        }
     }
 
     try std.testing.expect(saw_null);

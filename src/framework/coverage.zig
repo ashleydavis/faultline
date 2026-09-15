@@ -429,7 +429,9 @@ pub fn functionAtLine(allocator: std.mem.Allocator, source: [:0]const u8, line: 
             continue;
         }
         best_span = span;
-        if (best) |previous| allocator.free(previous.name);
+        if (best) |previous| {
+            allocator.free(previous.name);
+        }
         best = .{
             .name = try allocator.dupe(u8, name),
             .line = lineOf(tree, name_token),
@@ -806,7 +808,9 @@ pub fn listCalls(allocator: std.mem.Allocator, source: [:0]const u8, function_na
     var calls: std.ArrayList(Call) = .empty;
     errdefer {
         for (calls.items) |call| {
-            if (call.qualifier) |qualifier| allocator.free(qualifier);
+            if (call.qualifier) |qualifier| {
+                allocator.free(qualifier);
+            }
             allocator.free(call.name);
         }
         calls.deinit(allocator);
@@ -838,7 +842,9 @@ pub fn listCalls(allocator: std.mem.Allocator, source: [:0]const u8, function_na
 
 pub fn freeCalls(allocator: std.mem.Allocator, calls: []const Call) void {
     for (calls) |call| {
-        if (call.qualifier) |qualifier| allocator.free(qualifier);
+        if (call.qualifier) |qualifier| {
+            allocator.free(qualifier);
+        }
         allocator.free(call.name);
     }
     allocator.free(calls);
@@ -956,7 +962,9 @@ fn walkEveryBranch(allocator: std.mem.Allocator, tree: Ast, body: Ast.Node.Index
             // can tell apart from breaking on the last one, so it is a path of its own.
             if (loop_else) |maybe_else| {
                 if (maybe_else.unwrap()) |else_expr| {
-                    if (isUnreachableBody(tree, else_expr)) continue;
+                    if (isUnreachableBody(tree, else_expr)) {
+                        continue;
+                    }
                     const else_line = lineOf(tree, tree.firstToken(else_expr));
                     try paths.append(allocator, try pathFor(allocator, tree, else_expr, "loop", else_line, "completed"));
                 }

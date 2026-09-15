@@ -32,8 +32,12 @@ test "log returns a log whose annotations reach this recorder" {
     var saw_first = false;
     var saw_second = false;
     for (names) |name| {
-        if (std.mem.eql(u8, name, "first")) saw_first = true;
-        if (std.mem.eql(u8, name, "second")) saw_second = true;
+        if (std.mem.eql(u8, name, "first")) {
+            saw_first = true;
+        }
+        if (std.mem.eql(u8, name, "second")) {
+            saw_second = true;
+        }
     }
     try std.testing.expect(saw_first);
     try std.testing.expect(saw_second);
@@ -54,7 +58,9 @@ test "names copies what it hands back, so it outlives the recorder" {
 
     var found = false;
     for (names) |name| {
-        if (std.mem.eql(u8, name, "kept")) found = true;
+        if (std.mem.eql(u8, name, "kept")) {
+            found = true;
+        }
     }
     try std.testing.expect(found);
 }

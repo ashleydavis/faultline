@@ -161,7 +161,7 @@ normalise() {
     sed -E \
         -e "s|$REPO_DIR/||g" \
         -e '/^ +[0-9]+ calls exercised$/d' \
-        -e '/^ +took [0-9]+(m [0-9]+)?s$/d' \
+        -e '/^ +Took [0-9]+(m [0-9]+)?s\.$/d' \
         -e 's/, [0-9]+ calls//' \
         -e 's/, [0-9]+\.[0-9]+s//' \
         -e 's/, [0-9]+ms//' \
@@ -173,7 +173,7 @@ normalise() {
         -e '/^ *\^~*$/d' \
         -e 's|/[A-Za-z0-9_./+-]*/lib/std/|<zig>/lib/std/|g' \
         -e 's|/[A-Za-z0-9_./+-]*/flt[A-Za-z0-9-]+/|<work>/|g' \
-        -e 's|[A-Za-z0-9_./+-]*\.zig-cache/sim-coverage-report\.txt|<cache>/sim-coverage-report.txt|g' \
+        -e 's|[A-Za-z0-9_./+-]*\.zig-cache/([A-Za-z0-9_.-]+\.txt)|<cache>/\1|g' \
         -e 's|\.\./o/[0-9a-f]+/flt-sim|<cache>/flt-sim|g' \
         -e 's|\.zig-cache/o/[0-9a-f]+/|<cache>/|g' \
         -e '/^Build Summary:/,$d' \

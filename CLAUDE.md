@@ -58,7 +58,7 @@ Write beside every named constant why its value is what it is.
 
 Use 4-space indentation, braces on the same line, and `else` and `catch` on a new line.
 
-Never write an `if` on one line. Every one of them gets braces and a body on its own lines, whatever it does and however short it is: a bare `continue`, a `return`, a `break`. The one exception is `if (an) annotate(...)`, which is the marker itself and is read as a syntax by the code that builds a checklist.
+Never write an `if` or an `else` without braces. Every body goes on its own lines, whatever it does and however short it is: a bare `continue`, a `return`, a `break`. The one exception is `if (an) annotate(...)`, which is the marker itself and is read as a syntax by the code that builds a checklist.
 
 ## The contract
 

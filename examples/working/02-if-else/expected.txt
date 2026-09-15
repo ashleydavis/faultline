@@ -19,4 +19,3 @@ Deterministic simulation
   Coverage: 6 of 6 paths, 100%.
 
   Passed: every code path ran.
-  Took 0s.

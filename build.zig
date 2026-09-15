@@ -288,7 +288,14 @@ pub fn addFaultTest(b: *std.Build, options: FaultTestOptions) void {
     run.addArgs(&.{ "--repository", project_root });
     // Absolute, because the run stands in the sandbox rather than in the project, and a relative
     // path would put the report under the sandbox instead of in the build's own cache.
-    const report = b.pathJoin(&.{ project_root, b.cache_root.join(b.allocator, &.{"sim-coverage-report.txt"}) catch @panic("OOM") });
+    // Where the full checklist is written. The build's own cache by default, because the run
+    // generates it every time and nothing is meant to keep it. A path given here is taken as the
+    // project's own, not the sandbox's: the run stands in a directory of its own, so a relative path
+    // left alone would land somewhere the person who asked for it is not looking.
+    const report = if (b.option([]const u8, "report", "Where the full checklist is written")) |named|
+        (if (std.fs.path.isAbsolute(named)) named else b.pathJoin(&.{ project_root, named }))
+    else
+        b.pathJoin(&.{ project_root, b.cache_root.join(b.allocator, &.{"sim-coverage-report.txt"}) catch @panic("OOM") });
     run.addArgs(&.{ "--report", report });
     if (b.option([]const u8, "file", "Fault test only this file")) |only| {
         run.addArgs(&.{ "--file", only });

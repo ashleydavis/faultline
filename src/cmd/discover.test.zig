@@ -298,7 +298,7 @@ test "generateRoot writes the whole file, byte for byte" {
         \\    };
         \\
         \\    pub const modules = .{
-        \\        .{ .module = "packages/thing/src/thing.zig", .code = @import("packages/thing/src/thing.zig"), .literals = &[_][]const u8{"yes", }, .reflecting = &[_][]const u8{} },
+        \\        .{ .module = "packages/thing/src/thing.zig", .code = @import("packages/thing/src/thing.zig"), .literals = &[_][]const u8{"yes", }, .reflecting = &[_][]const u8{}, .uncallable = &[_][]const u8{} },
         \\    };
         \\
         \\    pub const helpers = .{
@@ -562,4 +562,57 @@ test "a function that reflects on its own type parameter is named so the run lea
     try std.testing.expectEqualStrings("firstDeclaration", found[0]);
     try std.testing.expectEqualStrings("oneField", found[1]);
     try std.testing.expectEqualStrings("askAnother", found[2]);
+}
+
+test "a generic function whose other parameter is written in terms of its type is one the run cannot call" {
+    var tree = try Tree.create(std.testing.allocator, "uncallable-generic");
+    defer tree.destroy();
+
+    try tree.write("picking.zig",
+        \\// Written in terms of its own type parameter, so what it takes is not known until it is
+        \\// instantiated and the run has nothing to make an argument from.
+        \\pub fn largest(log: anytype, comptime T: type, values: []const T) ?T {
+        \\    _ = log;
+        \\    _ = values;
+        \\    return null;
+        \\}
+        \\
+        \\// The one generic signature the run calls itself: a type and something to call beside it.
+        \\pub fn withRetries(log: anytype, comptime T: type, operation: anytype, attempts: usize) ?T {
+        \\    _ = log;
+        \\    _ = operation;
+        \\    _ = attempts;
+        \\    return null;
+        \\}
+        \\
+        \\// No type parameter at all, so nothing here applies to it.
+        \\pub fn add(first: usize, second: usize) usize {
+        \\    return first + second;
+        \\}
+        \\
+    );
+
+    const found = try discover.uncallableFunctionsIn(std.testing.allocator, tree.io, tree.dir, "picking.zig");
+    defer discover.freeNames(std.testing.allocator, found);
+
+    try std.testing.expectEqual(@as(usize, 1), found.len);
+    try std.testing.expectEqualStrings("largest", found[0]);
+}
+
+test "a value parameter of the type itself is one the run cannot make either" {
+    var tree = try Tree.create(std.testing.allocator, "uncallable-value-of-the-type");
+    defer tree.destroy();
+
+    try tree.write("passing.zig",
+        \\pub fn passItOn(comptime ReturnT: type, value: ReturnT) ReturnT {
+        \\    return value;
+        \\}
+        \\
+    );
+
+    const found = try discover.uncallableFunctionsIn(std.testing.allocator, tree.io, tree.dir, "passing.zig");
+    defer discover.freeNames(std.testing.allocator, found);
+
+    try std.testing.expectEqual(@as(usize, 1), found.len);
+    try std.testing.expectEqualStrings("passItOn", found[0]);
 }

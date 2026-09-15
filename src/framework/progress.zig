@@ -24,8 +24,12 @@ const bucket_one: u8 = 2;
 const bucket_many: u8 = 4;
 
 fn bucketOf(count: usize) u8 {
-    if (count == 0) return bucket_zero;
-    if (count == 1) return bucket_one;
+    if (count == 0) {
+        return bucket_zero;
+    }
+    if (count == 1) {
+        return bucket_one;
+    }
     return bucket_many;
 }
 

@@ -404,12 +404,72 @@ pub fn reflectingFunctionsIn(allocator: std.mem.Allocator, io: std.Io, root: std
     return found.toOwnedSlice(allocator);
 }
 
+// The functions in one file the run cannot call for itself: generic over a type, with another
+// parameter written in terms of that type. The run makes one argument per parameter from what the
+// types say, and a parameter written as `[]const T` says nothing until the function is instantiated,
+// so the run would hand it the stand-in it makes for an `anytype` and the compiler would refuse the
+// run's own binary rather than the call.
+//
+// They are left alone rather than refused outright: the paths in them still count, and the report
+// asks for a scenario, which is the one way such a function is reached.
+//
+// The caller owns what comes back.
+pub fn uncallableFunctionsIn(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, path: []const u8) ![]const []const u8 {
+    const source = root.readFileAllocOptions(io, path, allocator, .unlimited, .of(u8), 0) catch return &.{};
+    defer allocator.free(source);
+
+    var tokens: std.ArrayList(std.zig.Token) = .empty;
+    defer tokens.deinit(allocator);
+    var tokenizer = std.zig.Tokenizer.init(source);
+    while (true) {
+        const token = tokenizer.next();
+        try tokens.append(allocator, token);
+        if (token.tag == .eof) {
+            break;
+        }
+    }
+
+    var functions = try readFunctions(allocator, source, tokens.items);
+    defer freeFunctions(allocator, &functions);
+
+    var found: std.ArrayList([]const u8) = .empty;
+    errdefer freeNames(allocator, found.items);
+    for (functions.items) |function| {
+        var uses = false;
+        for (function.parameters.items) |parameter| {
+            if (parameter.uses_a_type_parameter) {
+                uses = true;
+            }
+        }
+        if (!uses) {
+            continue;
+        }
+        var already = false;
+        for (found.items) |seen| {
+            if (std.mem.eql(u8, seen, function.name)) {
+                already = true;
+            }
+        }
+        if (!already) {
+            try found.append(allocator, try allocator.dupe(u8, function.name));
+        }
+    }
+    return found.toOwnedSlice(allocator);
+}
+
 // One parameter of one function, as the walk needs it: its name, whether it is a `comptime` type,
 // and whether anything the function does with it needs a real type rather than a stand-in.
 const Parameter = struct {
     name: []const u8,
     is_a_type: bool,
     reflected: bool = false,
+
+    // Whether the type is written as one of the function's own `comptime` type parameters, as
+    // `[]const T` or `?T` or `T` itself is. `@typeInfo` reports such a parameter and an `anytype`
+    // identically, as a parameter with no type at all, so a run that went by the types alone would
+    // hand the stand-in it makes for an `anytype` to a `[]const T` and the compiler would refuse the
+    // run's own binary. The source is the only place the difference is written down.
+    uses_a_type_parameter: bool = false,
 };
 
 // One parameter of this function handed to another function, at the position that other function
@@ -432,6 +492,48 @@ fn freeFunctions(allocator: std.mem.Allocator, functions: *std.ArrayList(Functio
         function.handovers.deinit(allocator);
     }
     functions.deinit(allocator);
+}
+
+// Whether the type written from `at` onwards names one of the type parameters declared before it.
+// The type runs to the comma that ends this parameter or to the end of the list, whichever comes
+// first, and brackets and parentheses inside it are counted so a nested comma does not end it early.
+//
+// `anytype` names nothing, which is the case this is here to tell apart from the rest.
+fn namesATypeParameter(
+    source: [:0]const u8,
+    tokens: []const std.zig.Token,
+    at: usize,
+    declared: []const Parameter,
+) bool {
+    var depth: usize = 0;
+    var scan = at;
+    while (scan < tokens.len) : (scan += 1) {
+        switch (tokens[scan].tag) {
+            .l_paren, .l_bracket, .l_brace => {
+                depth += 1;
+            },
+            .r_paren, .r_bracket, .r_brace => {
+                if (depth == 0) {
+                    return false;
+                }
+                depth -= 1;
+            },
+            .comma => {
+                if (depth == 0) {
+                    return false;
+                }
+            },
+            .identifier => {
+                for (declared) |parameter| {
+                    if (parameter.is_a_type and std.mem.eql(u8, parameter.name, textOf(source, tokens[scan]))) {
+                        return true;
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+    return false;
 }
 
 // Every function the file declares, with its parameters and what it does with them. Names point
@@ -478,6 +580,7 @@ fn readFunctions(allocator: std.mem.Allocator, source: [:0]const u8, tokens: []c
                         try function.parameters.append(allocator, .{
                             .name = textOf(source, tokens[after]),
                             .is_a_type = named_a_type,
+                            .uses_a_type_parameter = namesATypeParameter(source, tokens, after + 2, function.parameters.items),
                         });
                         comptime_next = false;
                     }
@@ -989,6 +1092,14 @@ pub fn generateRoot(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir, 
             const reflecting = try reflectingFunctionsIn(allocator, io, root, module_path);
             defer freeNames(allocator, reflecting);
             for (reflecting) |function| {
+                try writer.print("\"{s}\", ", .{function});
+            }
+            // The functions the run leaves alone for the same reason and asks a scenario for
+            // instead: their arguments cannot be made until the function is instantiated.
+            try writer.writeAll("}, .uncallable = &[_][]const u8{");
+            const uncallable = try uncallableFunctionsIn(allocator, io, root, module_path);
+            defer freeNames(allocator, uncallable);
+            for (uncallable) |function| {
                 try writer.print("\"{s}\", ", .{function});
             }
             try writer.writeAll("} },\n");
