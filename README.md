@@ -20,8 +20,7 @@ It is a library your project depends on. Two lines put it in, one to fetch it an
 
 ## Resources
 
-- `docs/contract.md` for what Faultline promises and what it asks of you.
-- `docs/QUICK_REF.md` to add Faultline to a repository and use it.
-- `docs/USER-GUIDE.md` to exhaustively test every function you write, with minimal effort.
-- `docs/OUTPUT.md` for what a run prints and what each line means.
-- `docs/DEVELOPMENT.md` to work on Faultline itself.
+- [Quick reference](docs/QUICK-REF.md) to add Faultline to a repository and use it.
+- [User guide](docs/USER-GUIDE.md) to exhaustively test every function you write, with minimal effort.
+- [Output](docs/OUTPUT.md) for what a run prints and what each line means.
+- [Development](docs/DEVELOPMENT.md) to work on Faultline itself.
