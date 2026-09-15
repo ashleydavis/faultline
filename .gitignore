@@ -4,3 +4,4 @@ node_modules/
 tmp/
 .test-durations/
 .what-changed/
+.claude/worktrees
