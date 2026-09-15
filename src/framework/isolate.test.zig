@@ -90,3 +90,24 @@ test "a plan says what was stepped over and what lies in a range" {
     try std.testing.expectEqual(@as(usize, 1), plan.skippedCountWithin(1, 5));
     try std.testing.expectEqual(@as(usize, 2), plan.skippedCountWithin(1, 9));
 }
+
+test "elapsed reads as seconds under a minute and as minutes and seconds above one" {
+    var buffer: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("0s", isolate.elapsedText(&buffer, 0));
+    try std.testing.expectEqualStrings("9s", isolate.elapsedText(&buffer, 9 * std.time.ns_per_s));
+    try std.testing.expectEqualStrings("59s", isolate.elapsedText(&buffer, 59 * std.time.ns_per_s));
+    try std.testing.expectEqualStrings("1m 0s", isolate.elapsedText(&buffer, 60 * std.time.ns_per_s));
+    try std.testing.expectEqualStrings("2m 14s", isolate.elapsedText(&buffer, 134 * std.time.ns_per_s));
+}
+
+test "the progress line names the function and never the file it is in" {
+    var buffer: [256]u8 = undefined;
+    try std.testing.expectEqualStrings(", now in formatFileSize", isolate.whereText(&buffer, "src/lib/format.zig\tformatFileSize"));
+}
+
+test "nothing is said about where the calls are until a function has been named" {
+    var buffer: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("", isolate.whereText(&buffer, null));
+    try std.testing.expectEqualStrings("", isolate.whereText(&buffer, "src/lib/format.zig"));
+    try std.testing.expectEqualStrings("", isolate.whereText(&buffer, "src/lib/format.zig\t"));
+}

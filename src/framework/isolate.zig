@@ -581,19 +581,25 @@ pub fn freeTimings(allocator: std.mem.Allocator) void {
     if (timing_key) |held| allocator.free(held);
     timing_key = null;
     timing_calls = 0;
+    progress_started_ns = 0;
+    progress_last_ns = 0;
 }
 
 // How often a run says how far it has got. A run takes minutes and its whole report comes at the
-// end, so without a line every so often it cannot be told from a run that has hung.
+// end, so without this it cannot be told from a run that has hung.
 //
-// Five thousand puts a line on the screen every few seconds and about fifty in a whole run, which
-// is enough to watch and short enough to scroll past. At five hundred, measured on 2026-09-11, a
-// run printed 445 of them, one every half second, and buried its own report.
-const progress_every = 5000;
+// Half a second, and measured in time rather than in calls, because the line is rewritten in place
+// rather than scrolled: it has to keep up with a run that is moving and stay quiet on one that is
+// not. Counting calls, which is what this did until 2026-09-15, tied the update rate to how fast
+// the calls happened to be: 80 lines in a two minute run, and nothing at all for the length of one
+// slow function, which is the case the line exists for.
+const progress_every_ns = 500 * std.time.ns_per_ms;
 
-// The call the last progress line named. A restart resumes the walk after the call it stepped over,
-// so this keeps the count moving forward rather than starting again from where the restart began.
-var progress_reported: usize = 0;
+// When the run's first progress line was written, and when its last one was. Both are wall clock,
+// read only to decide when to print and what to say the elapsed time is. Nothing in the simulation
+// is decided by either.
+var progress_started_ns: u64 = 0;
+var progress_last_ns: u64 = 0;
 
 // Whether anybody is watching. These lines exist so a person can tell a slow run from a hung one,
 // which nothing captured to a file needs: there they are fifty lines of noise around the report.
@@ -604,11 +610,48 @@ fn reportProgress(index: usize) void {
     if (!progress_is_watched) {
         return;
     }
-    if (index < progress_reported + progress_every) {
+
+    const now = nowNs();
+    if (progress_started_ns == 0) {
+        progress_started_ns = now;
+    }
+    if (now - progress_last_ns < progress_every_ns) {
         return;
     }
-    progress_reported = index;
-    output_mod.print("  Drove {d} call{s}.\n", .{ index, if (index == 1) "" else "s" });
+    progress_last_ns = now;
+
+    var elapsed_buffer: [32]u8 = undefined;
+    var where_buffer: [256]u8 = undefined;
+    output_mod.printProgress("  Drove {d} call{s} in {s}{s}.", .{
+        index,
+        if (index == 1) "" else "s",
+        elapsedText(&elapsed_buffer, now - progress_started_ns),
+        whereText(&where_buffer, timing_key),
+    });
+}
+
+// How long the run has been going, as the fragment the progress line reads it back as: "9s" for
+// under a minute, "2m 14s" above it. The buffer is the caller's, so this allocates nothing on a
+// path that runs twice a second.
+pub fn elapsedText(buffer: []u8, nanos: u64) []const u8 {
+    const seconds = nanos / std.time.ns_per_s;
+    if (seconds < 60) {
+        return std.fmt.bufPrint(buffer, "{d}s", .{seconds}) catch "a while";
+    }
+    return std.fmt.bufPrint(buffer, "{d}m {d}s", .{ seconds / 60, seconds % 60 }) catch "a while";
+}
+
+// Which function the calls are going into, as the clause on the end of the progress line, or
+// nothing at all when no function has been named yet. `key` is the file and the function with a
+// tab between them; the file is left out because the line above already named the package.
+pub fn whereText(buffer: []u8, key: ?[]const u8) []const u8 {
+    const named = key orelse return "";
+    const tab = std.mem.indexOfScalar(u8, named, '\t') orelse return "";
+    const name = named[tab + 1 ..];
+    if (name.len == 0) {
+        return "";
+    }
+    return std.fmt.bufPrint(buffer, ", now in {s}", .{name}) catch "";
 }
 
 // Runs `body` as many times as it takes: every time a child dies or stalls, the call it was on is
